@@ -1,0 +1,23 @@
+# Workload "menu" — consumed by `xrd-readgen run` (Phase 1).
+# Mirrors the DC24 dc_inject menu workflow, but for remote reads.
+run_id: dev-local-smoke
+duration: 5m
+auth:
+  mode: x509               # x509 proxy via X509_USER_PROXY
+targets:
+  - name: local-dev
+    endpoint: root://localhost:10940/
+    filelist: filelists/local.txt
+    target_rate: 500MiBps  # cap enforced by token bucket
+    workers: 16            # max in-flight reads
+    pattern:
+      type: mixed          # sequential | random | vector | mixed
+      read_size: {dist: fixed, bytes: 1MiB}
+      vector_reads: {fraction: 0.4, chunks: {min: 4, max: 64}, chunk_size: 128KiB}
+      file_fraction: 1.0   # fraction of each file to read before closing
+      reopen: true         # new File per file — exercises the open/redirect path
+client_tuning:             # surfaced XRD_* knobs, recorded with the run
+  sub_streams: 1           # XRD_SUBSTREAMSPERCHANNEL
+sinks:
+  file: {dir: results/, snapshot_interval: 15s}
+  pushgateway: {url: "http://localhost:9091", interval: 15s}
