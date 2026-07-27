@@ -15,8 +15,8 @@ struct ReadOptions {
   bool json = false;              // machine-readable output
 };
 
-// Timed single-file remote read: open -> (stat) -> read loop -> close,
-// fully async on XrdCl response handlers. Returns process exit code.
+// CLI wrapper: run one FileSession and print timings (text or JSON).
+// Returns process exit code.
 int RunReadCommand(const ReadOptions& opts);
 
 }  // namespace readgen

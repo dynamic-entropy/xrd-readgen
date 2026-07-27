@@ -24,6 +24,7 @@ FetchContent_MakeAvailable(cli11)
 
 add_executable(xrd-readgen
   src/main.cc
+  src/file_session.cc
   src/read_command.cc)
 
 target_include_directories(xrd-readgen PRIVATE include)
