@@ -1,0 +1,194 @@
+#include "readgen/run_command.hh"
+
+#include "readgen/error_classifier.hh"
+#include "readgen/file_session.hh"
+#include "readgen/inflight.hh"
+#include "readgen/scheduler.hh"
+#include "readgen/token_bucket.hh"
+#include "readgen/units.hh"
+
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cinttypes>
+#include <cstdio>
+#include <map>
+#include <mutex>
+#include <string>
+#include <thread>
+
+namespace readgen {
+namespace {
+
+using Clock = std::chrono::steady_clock;
+
+void PrintDryRun(const RunConfig& cfg) {
+    std::printf("run_id:         %s\n", cfg.run_id.c_str());
+    std::printf("duration:       %s\n", FormatDuration(cfg.duration_s).c_str());
+    std::printf("endpoint:       %s\n", cfg.endpoint.c_str());
+    std::printf("filelist:       %s (%zu files)\n", cfg.filelist_path.c_str(), cfg.files.size());
+    std::printf("target_rate:    %s\n",
+                cfg.target_rate_bps ? FormatRate(cfg.target_rate_bps).c_str() : "uncapped");
+    std::printf("workers:        %" PRIu32 " (max in-flight sessions)\n", cfg.workers);
+    std::printf("pattern:        %s\n", PatternTypeName(cfg.pattern));
+    std::printf("chunk_size:     %s\n", FormatBytes(cfg.chunk_size).c_str());
+    if (cfg.pattern == PatternType::Vector || cfg.pattern == PatternType::Mixed) {
+        std::printf("vector_chunks:  %" PRIu16 "\n", cfg.vector_chunks);
+        if (cfg.pattern == PatternType::Mixed)
+            std::printf("vector_fraction:%.2f\n", cfg.vector_fraction);
+    }
+    std::printf("file_fraction:  %.3f\n", cfg.file_fraction);
+    if (cfg.max_bytes > 0) {
+        std::printf("max_bytes:      %s%s\n", FormatBytes(cfg.max_bytes).c_str(),
+                    cfg.max_bytes_auto ? " (auto)" : "");
+    }
+    std::printf("seed:           %" PRIu64 "\n", cfg.seed);
+    std::printf("dry_run:        true (no I/O)\n");
+    if (!cfg.files.empty()) {
+        std::printf("example URL:    %s\n", JoinUrl(cfg.endpoint, cfg.files.front()).c_str());
+    }
+}
+
+struct RunStats {
+    std::mutex mu;
+    uint64_t sessions_ok = 0;
+    uint64_t sessions_fail = 0;
+    uint64_t bytes = 0;
+    uint64_t ops = 0;
+    std::map<ErrorClass, uint64_t> errors;
+};
+
+int RunEngine(const RunConfig& cfg) {
+    // Burst must cover one session charge; default 1s-of-rate is too small when
+    // --max-bytes is large (Acquire would wait until deadline and transfer 0).
+    const uint64_t burst =
+        cfg.target_rate_bps == 0
+            ? 0
+            : std::max(cfg.target_rate_bps, cfg.max_bytes > 0 ? cfg.max_bytes : cfg.target_rate_bps);
+    TokenBucket bucket(cfg.target_rate_bps, burst);
+    InFlightSemaphore inflight(cfg.workers);
+    Scheduler sched(cfg);
+    RunStats stats;
+
+    std::atomic<uint64_t> live{0};
+    const auto t0 = Clock::now();
+    const auto deadline = t0 + std::chrono::duration_cast<Clock::duration>(
+                                   std::chrono::duration<double>(cfg.duration_s));
+
+    std::fprintf(stderr, "run %s: duration=%s rate=%s workers=%" PRIu32 " pattern=%s files=%zu\n",
+                 cfg.run_id.c_str(), FormatDuration(cfg.duration_s).c_str(),
+                 cfg.target_rate_bps ? FormatRate(cfg.target_rate_bps).c_str() : "uncapped", cfg.workers,
+                 PatternTypeName(cfg.pattern), cfg.files.size());
+
+    while (Clock::now() < deadline) {
+        if (!inflight.AcquireUntil(deadline)) break;
+
+        WorkItem work = sched.Next();
+        if (!bucket.AcquireUntil(work.charge_bytes, deadline)) {
+            inflight.Release();
+            break;
+        }
+
+        const uint64_t charged = work.charge_bytes;
+        live.fetch_add(1, std::memory_order_relaxed);
+
+        StartFileSession(work.session, [&, charged](FileSessionResult result) {
+            {
+                std::lock_guard<std::mutex> lock(stats.mu);
+                if (result.ok) {
+                    ++stats.sessions_ok;
+                    stats.bytes += result.bytes_read;
+                    stats.ops += result.ops;
+                } else {
+                    ++stats.sessions_fail;
+                    const ErrorClass cls =
+                        ClassifyXRootDError(result.status_code, result.err_code, result.error);
+                    ++stats.errors[cls];
+                    if (stats.sessions_fail <= 3) {
+                        std::fprintf(stderr, "session error: %s\n", result.error.c_str());
+                    }
+                }
+
+                if (result.bytes_read > charged) {
+                    // Consume extra tokens without blocking (may briefly overshoot).
+                    const uint64_t extra = result.bytes_read - charged;
+                    (void)bucket.TryAcquire(extra);
+                } else if (result.bytes_read < charged) {
+                    bucket.Refund(charged - result.bytes_read);
+                }
+            }
+            live.fetch_sub(1, std::memory_order_relaxed);
+            inflight.Release();
+        });
+    }
+
+    // Drain in-flight sessions.
+    const auto drain_deadline = Clock::now() + std::chrono::minutes(10);
+    while (live.load(std::memory_order_relaxed) > 0 && Clock::now() < drain_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    const double elapsed = std::chrono::duration<double>(Clock::now() - t0).count();
+    uint64_t bytes = 0, ops = 0, ok = 0, fail = 0;
+    std::map<ErrorClass, uint64_t> errors;
+    {
+        std::lock_guard<std::mutex> lock(stats.mu);
+        bytes = stats.bytes;
+        ops = stats.ops;
+        ok = stats.sessions_ok;
+        fail = stats.sessions_fail;
+        errors = stats.errors;
+    }
+
+    const double mib_s = elapsed > 0 ? bytes / elapsed / (1024.0 * 1024.0) : 0.0;
+    const double target_mib_s = cfg.target_rate_bps / (1024.0 * 1024.0);
+
+    std::printf("=== run summary ===\n");
+    std::printf("run_id:         %s\n", cfg.run_id.c_str());
+    std::printf("elapsed:        %.3f s\n", elapsed);
+    std::printf("sessions:       %" PRIu64 " ok / %" PRIu64 " fail\n", ok, fail);
+    std::printf("bytes:          %s (%" PRIu64 ")\n", FormatBytes(bytes).c_str(), bytes);
+    std::printf("ops:            %" PRIu64 "\n", ops);
+    std::printf("achieved:       %.2f MiB/s\n", mib_s);
+    if (cfg.target_rate_bps) std::printf("target:         %.2f MiB/s\n", target_mib_s);
+    std::printf("inflight peak:  %" PRIu32 " / %" PRIu32 "\n", inflight.peak(), inflight.max());
+    if (!errors.empty()) {
+        std::printf("errors:\n");
+        for (const auto& e : errors) {
+            std::printf("  %-14s %" PRIu64 "\n", ErrorClassName(e.first), e.second);
+        }
+    }
+
+    return fail > 0 && ok == 0 ? 1 : 0;
+}
+
+}  // namespace
+
+int RunRunCommand(const RunConfig& cfg_in) {
+    RunConfig cfg = cfg_in;
+    try {
+        ResolveRunConfig(cfg);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "error: %s\n", e.what());
+        return 2;
+    }
+    if (cfg.endpoint.empty()) {
+        std::fprintf(stderr, "error: --endpoint is required\n");
+        return 2;
+    }
+    if (cfg.files.empty()) {
+        std::fprintf(stderr, "error: filelist is empty\n");
+        return 2;
+    }
+    if (cfg.dry_run) {
+        PrintDryRun(cfg);
+        return 0;
+    }
+    if (cfg.max_bytes_auto) {
+        std::fprintf(stderr, "max_bytes auto → %s (rate/workers × 8s, capped)\n",
+                     FormatBytes(cfg.max_bytes).c_str());
+    }
+    return RunEngine(cfg);
+}
+
+}  // namespace readgen

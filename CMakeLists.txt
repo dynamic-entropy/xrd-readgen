@@ -13,7 +13,6 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif()
 
-# XrdCl from the installed XRootD (or a local build tree via -DXRootD_DIR=...)
 find_package(XRootD REQUIRED COMPONENTS CLIENT)
 
 include(FetchContent)
@@ -22,10 +21,20 @@ FetchContent_Declare(cli11
   DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 FetchContent_MakeAvailable(cli11)
 
+set(READGEN_SOURCES
+  src/file_session.cc
+  src/read_command.cc
+  src/run_command.cc
+  src/run_config.cc
+  src/units.cc
+  src/token_bucket.cc
+  src/inflight.cc
+  src/error_classifier.cc
+  src/scheduler.cc)
+
 add_executable(xrd-readgen
   src/main.cc
-  src/file_session.cc
-  src/read_command.cc)
+  ${READGEN_SOURCES})
 
 target_include_directories(xrd-readgen PRIVATE include)
 
@@ -40,5 +49,29 @@ target_link_libraries(xrd-readgen PRIVATE
 
 install(TARGETS xrd-readgen RUNTIME DESTINATION bin)
 
-# Tests arrive with the Phase 1 engine (scheduler / rate limiter / error classifier).
 enable_testing()
+
+FetchContent_Declare(googletest
+  URL https://github.com/google/googletest/archive/refs/tags/v1.15.2.tar.gz
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
+
+add_executable(xrd-readgen-tests
+  tests/test_units.cc
+  tests/test_token_bucket.cc
+  tests/test_error_classifier.cc
+  tests/test_auto_max_bytes.cc
+  src/units.cc
+  src/token_bucket.cc
+  src/error_classifier.cc
+  src/run_config.cc)
+
+target_include_directories(xrd-readgen-tests PRIVATE include)
+target_compile_options(xrd-readgen-tests PRIVATE -Wall -Wextra)
+target_link_libraries(xrd-readgen-tests PRIVATE GTest::gtest_main)
+
+include(GoogleTest)
+gtest_discover_tests(xrd-readgen-tests)

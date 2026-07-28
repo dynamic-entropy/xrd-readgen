@@ -1,5 +1,7 @@
 build/
 .cache/
 docs/
+filelists/
 compile_commands.json
 proxy
+results/

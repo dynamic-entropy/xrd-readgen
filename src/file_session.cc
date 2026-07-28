@@ -10,7 +10,9 @@
 #include <functional>
 #include <future>
 #include <limits>
+#include <random>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace readgen {
@@ -26,18 +28,12 @@ double SecsBetween(Clock::time_point a, Clock::time_point b) {
     return std::chrono::duration<double>(b - a).count();
 }
 
-// Adapter so each pipeline stage can be a member std::function on FileSession.
-// XrdCl hands us ownership of status/response/hosts; the bound function frees
-// them.
 class FnHandler final : public XrdCl::ResponseHandler {
    public:
     using Fn = std::function<void(XrdCl::XRootDStatus*, XrdCl::AnyObject*, XrdCl::HostList*)>;
 
     void Set(Fn fn) { fn_ = std::move(fn); }
 
-    // XrdCl may invoke either entry point depending on version/op. Override
-    // both so we never fall through to the base no-op HandleResponse (which
-    // hangs us forever on done_.get_future()).
     void HandleResponseWithHosts(XrdCl::XRootDStatus* status, XrdCl::AnyObject* response,
                                  XrdCl::HostList* hosts) override {
         fn_(status, response, hosts);
@@ -53,7 +49,8 @@ class FnHandler final : public XrdCl::ResponseHandler {
 
 class FileSession {
    public:
-    explicit FileSession(const FileSessionOptions& opts) : opts_(opts) {
+    FileSession(const FileSessionOptions& opts, FileSessionDone on_done, bool heap)
+        : opts_(opts), on_done_(std::move(on_done)), heap_(heap) {
         result_.url = opts_.url;
         result_.vector = opts_.vector_chunks > 0;
 
@@ -63,18 +60,30 @@ class FileSession {
         close_handler_.Set([this](auto* st, auto* resp, auto* hosts) { OnClose(st, resp, hosts); });
     }
 
-    FileSessionResult Run() {
+    // Submit Open. Returns false if submission failed (Complete already called).
+    bool Start() {
         buffer_.resize(OpBytes());
-
         t_start_ = Clock::now();
         XrdCl::XRootDStatus st =
             file_.Open(opts_.url, XrdCl::OpenFlags::Read, XrdCl::Access::None, &open_handler_);
         if (!st.IsOK()) {
             result_.error = "open submission failed: " + st.ToString();
-            return result_;
+            result_.status_code = st.code;
+            result_.err_code = st.errNo;
+            Complete();
+            return false;
         }
+        return true;
+    }
 
-        done_.get_future().get();
+    FileSessionResult RunBlocking() {
+        std::promise<void> done;
+        auto fut = done.get_future();
+        on_done_ = [&](FileSessionResult r) {
+            result_ = std::move(r);
+            done.set_value();
+        };
+        if (Start()) fut.get();
         return result_;
     }
 
@@ -83,10 +92,25 @@ class FileSession {
         return opts_.vector_chunks > 0 ? opts_.chunk_size * opts_.vector_chunks : opts_.chunk_size;
     }
 
+    void Complete() {
+        if (on_done_) {
+            FileSessionDone cb = std::move(on_done_);
+            FileSessionResult r = result_;
+            // Self-delete when started via StartFileSession (heap). RunBlocking keeps stack.
+            const bool heap = heap_;
+            cb(std::move(r));
+            if (heap) delete this;
+        }
+    }
+
     void Fail(const char* stage, XrdCl::XRootDStatus* st) {
         result_.error = std::string(stage) + " failed: " + (st ? st->ToString() : "(no status)");
+        if (st) {
+            result_.status_code = st->code;
+            result_.err_code = st->errNo;
+        }
         delete st;
-        done_.set_value();
+        Complete();
     }
 
     void FinishOk() {
@@ -108,7 +132,7 @@ class FileSession {
         result_.op_lat_avg_ms = ops_ > 0 ? lat_sum_ms_ / ops_ : 0.0;
         result_.op_lat_max_ms = lat_max_ms_;
 
-        done_.set_value();
+        Complete();
     }
 
     void OnOpen(XrdCl::XRootDStatus* st, XrdCl::AnyObject* resp, XrdCl::HostList* hosts) {
@@ -122,14 +146,14 @@ class FileSession {
         delete st;
 
         file_.GetProperty("DataServer", data_server_);
-        // Stat(false) after Open can complete *synchronously* from the cached
-        // kXR_retstat StatInfo while still inside OpenHandler. Nesting Read
-        // from that re-entrant callback deadlocks XrdCl's JobManager. Force a
-        // real round-trip so the Stat callback stays asynchronous.
+        // Stat(false) after Open can complete synchronously from cached kXR_retstat
+        // while still inside OpenHandler — nesting Read deadlocks JobManager.
         XrdCl::XRootDStatus s = file_.Stat(/*force=*/true, &stat_handler_);
         if (!s.IsOK()) {
             result_.error = "stat submission failed: " + s.ToString();
-            done_.set_value();
+            result_.status_code = s.code;
+            result_.err_code = s.errNo;
+            Complete();
         }
     }
 
@@ -146,21 +170,34 @@ class FileSession {
         file_size_ = info ? info->GetSize() : 0;
         delete resp;
 
-        if (opts_.offset >= file_size_) {
+        uint64_t start = opts_.offset;
+        uint64_t budget = file_size_;
+
+        if (opts_.file_fraction > 0.0 && opts_.file_fraction < 1.0) {
+            budget = static_cast<uint64_t>(static_cast<double>(file_size_) * opts_.file_fraction);
+        }
+        if (opts_.max_bytes > 0) budget = std::min(budget, opts_.max_bytes);
+
+        if (opts_.random_offset && file_size_ > 0) {
+            const uint64_t max_start = file_size_ > budget ? file_size_ - budget : 0;
+            std::mt19937_64 rng(opts_.offset_seed);
+            start = std::uniform_int_distribution<uint64_t>(0, max_start)(rng);
+        }
+
+        if (start >= file_size_) {
             char buf[128];
-            std::snprintf(buf, sizeof(buf), "offset %" PRIu64 " is beyond file size %" PRIu64, opts_.offset,
+            std::snprintf(buf, sizeof(buf), "offset %" PRIu64 " is beyond file size %" PRIu64, start,
                           file_size_);
             result_.error = buf;
             result_.file_size = file_size_;
             result_.data_server = data_server_;
             result_.open_hosts = hops_;
-            done_.set_value();
+            Complete();
             return;
         }
 
-        remaining_ = file_size_ - opts_.offset;
-        if (opts_.max_bytes > 0) remaining_ = std::min(remaining_, opts_.max_bytes);
-        next_offset_ = opts_.offset;
+        remaining_ = std::min(file_size_ - start, budget);
+        next_offset_ = start;
         IssueNext();
     }
 
@@ -170,7 +207,9 @@ class FileSession {
             XrdCl::XRootDStatus s = file_.Close(&close_handler_);
             if (!s.IsOK()) {
                 result_.error = "close submission failed: " + s.ToString();
-                done_.set_value();
+                result_.status_code = s.code;
+                result_.err_code = s.errNo;
+                Complete();
             }
             return;
         }
@@ -197,7 +236,9 @@ class FileSession {
         }
         if (!s.IsOK()) {
             result_.error = "read submission failed: " + s.ToString();
-            done_.set_value();
+            result_.status_code = s.code;
+            result_.err_code = s.errNo;
+            Complete();
         }
     }
 
@@ -232,7 +273,7 @@ class FileSession {
 
         bytes_read_ += got;
         next_offset_ += got;
-        remaining_ = got < requested_ ? 0 : remaining_ - got;  // short read => EOF
+        remaining_ = got < requested_ ? 0 : remaining_ - got;
         IssueNext();
     }
 
@@ -246,10 +287,11 @@ class FileSession {
     }
 
     const FileSessionOptions opts_;
+    FileSessionDone on_done_;
+    const bool heap_;
     FileSessionResult result_;
     XrdCl::File file_;
     std::vector<char> buffer_;
-    std::promise<void> done_;
 
     FnHandler open_handler_, stat_handler_, read_handler_, close_handler_;
 
@@ -272,7 +314,13 @@ class FileSession {
 }  // namespace
 
 FileSessionResult RunFileSession(const FileSessionOptions& opts) {
-    return FileSession(opts).Run();
+    FileSession session(opts, nullptr, /*heap=*/false);
+    return session.RunBlocking();
+}
+
+void StartFileSession(const FileSessionOptions& opts, FileSessionDone on_done) {
+    auto* session = new FileSession(opts, std::move(on_done), /*heap=*/true);
+    (void)session->Start();  // On sync failure Complete() already deleted the session.
 }
 
 }  // namespace readgen

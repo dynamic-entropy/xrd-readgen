@@ -1,12 +1,13 @@
-# Workload "menu" — consumed by `xrd-readgen run` (Phase 1).
-# Mirrors the DC24 dc_inject menu workflow, but for remote reads.
+# Workload "menu" — future shape for `xrd-readgen run workload.yaml`.
+# Not loaded yet (`run` is CLI-driven today). Mirrors the DC24 dc_inject
+# menu workflow, but for remote reads.
 run_id: dev-local-smoke
 duration: 5m
 auth:
   mode: x509               # x509 proxy via X509_USER_PROXY
 targets:
   - name: local-dev
-    endpoint: root://localhost:10940/
+    endpoint: root://localhost:10945/
     filelist: filelists/local.txt
     target_rate: 500MiBps  # cap enforced by token bucket
     workers: 16            # max in-flight reads
