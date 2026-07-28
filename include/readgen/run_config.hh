@@ -27,6 +27,13 @@ struct RunConfig {
     bool reopen = true;
     uint64_t seed = 1;
     bool dry_run = false;
+
+    // Metrics / FileSink (Chunk 3)
+    std::string results_dir = "results";
+    double snapshot_interval_s = 15.0;
+    std::string job_id;       // empty → hostname or "local"
+    bool write_results = true;  // --no-results disables FileSink
+    std::string target = "default";  // label; single-target CLI
 };
 
 const char* PatternTypeName(PatternType t);

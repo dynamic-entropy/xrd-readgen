@@ -21,6 +21,11 @@ FetchContent_Declare(cli11
   DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 FetchContent_MakeAvailable(cli11)
 
+FetchContent_Declare(json
+  URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+FetchContent_MakeAvailable(json)
+
 set(READGEN_SOURCES
   src/file_session.cc
   src/read_command.cc
@@ -30,7 +35,9 @@ set(READGEN_SOURCES
   src/token_bucket.cc
   src/inflight.cc
   src/error_classifier.cc
-  src/scheduler.cc)
+  src/scheduler.cc
+  src/metrics.cc
+  src/file_sink.cc)
 
 add_executable(xrd-readgen
   src/main.cc
@@ -45,7 +52,8 @@ target_compile_options(xrd-readgen PRIVATE -Wall -Wextra)
 
 target_link_libraries(xrd-readgen PRIVATE
   XRootD::XrdCl
-  CLI11::CLI11)
+  CLI11::CLI11
+  nlohmann_json::nlohmann_json)
 
 install(TARGETS xrd-readgen RUNTIME DESTINATION bin)
 
@@ -64,14 +72,20 @@ add_executable(xrd-readgen-tests
   tests/test_token_bucket.cc
   tests/test_error_classifier.cc
   tests/test_auto_max_bytes.cc
+  tests/test_metrics.cc
+  tests/test_file_sink.cc
   src/units.cc
   src/token_bucket.cc
   src/error_classifier.cc
-  src/run_config.cc)
+  src/run_config.cc
+  src/metrics.cc
+  src/file_sink.cc)
 
 target_include_directories(xrd-readgen-tests PRIVATE include)
 target_compile_options(xrd-readgen-tests PRIVATE -Wall -Wextra)
-target_link_libraries(xrd-readgen-tests PRIVATE GTest::gtest_main)
+target_link_libraries(xrd-readgen-tests PRIVATE
+  GTest::gtest_main
+  nlohmann_json::nlohmann_json)
 
 include(GoogleTest)
 gtest_discover_tests(xrd-readgen-tests)

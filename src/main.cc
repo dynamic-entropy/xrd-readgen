@@ -62,6 +62,8 @@ int main(int argc, char** argv) {
     std::string max_bytes_str;
     std::string pattern_str = "sequential";
     std::string filelist_path;
+    std::string snapshot_str = "15s";
+    bool no_results = false;
 
     auto* run_cmd = app.add_subcommand("run", "Execute a sustained read workload");
     run_cmd->add_option("--endpoint", run_cfg.endpoint, "root:// endpoint (e.g. root://localhost:10945/)")
@@ -78,6 +80,10 @@ int main(int argc, char** argv) {
                         "Hard cap bytes per session (SIZE or 'auto' from --rate/--workers)");
     run_cmd->add_option("--seed", run_cfg.seed, "RNG seed");
     run_cmd->add_option("--run-id", run_cfg.run_id, "Run identifier");
+    run_cmd->add_option("--job-id", run_cfg.job_id, "Job/instance label (default: hostname)");
+    run_cmd->add_option("--results-dir", run_cfg.results_dir, "Directory for metrics.jsonl + result.json");
+    run_cmd->add_option("--snapshot-interval", snapshot_str, "Metrics JSONL snapshot interval");
+    run_cmd->add_flag("--no-results", no_results, "Disable FileSink output");
     run_cmd->add_flag("--dry-run", run_cfg.dry_run, "Print resolved config; no I/O");
 
     auto* validate_cmd = app.add_subcommand("validate", "Validate a workload menu");
@@ -106,6 +112,8 @@ int main(int argc, char** argv) {
             run_cfg.pattern = ParsePattern(pattern_str);
             run_cfg.filelist_path = filelist_path;
             run_cfg.files = readgen::LoadFileList(filelist_path);
+            run_cfg.snapshot_interval_s = readgen::ParseDurationString(snapshot_str);
+            run_cfg.write_results = !no_results;
         } catch (const std::exception& e) {
             std::fprintf(stderr, "error: %s\n", e.what());
             return 2;
