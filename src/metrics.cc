@@ -152,6 +152,21 @@ void MetricsRegistry::ObserveSessionFail(const std::string& error_class) {
         err_unknown_.fetch_add(1, std::memory_order_relaxed);
 }
 
+void MetricsRegistry::ObserveSoftFault(const std::string& kind) {
+    if (kind == "connection")
+        soft_connection_.fetch_add(1, std::memory_order_relaxed);
+    else if (kind == "timeout")
+        soft_timeout_.fetch_add(1, std::memory_order_relaxed);
+    else if (kind == "tls_auth")
+        soft_tls_auth_.fetch_add(1, std::memory_order_relaxed);
+    else if (kind == "io")
+        soft_io_.fetch_add(1, std::memory_order_relaxed);
+    else if (kind == "redirect")
+        soft_redirect_.fetch_add(1, std::memory_order_relaxed);
+    else
+        soft_other_.fetch_add(1, std::memory_order_relaxed);
+}
+
 void MetricsRegistry::SetInflight(uint64_t live, uint64_t peak) {
     inflight_reads_.store(live, std::memory_order_relaxed);
     peak_inflight_.store(peak, std::memory_order_relaxed);
@@ -163,7 +178,7 @@ void MetricsRegistry::SampleProc() {
     rss_bytes_.store(s.rss_bytes, std::memory_order_relaxed);
 }
 
-MetricsSnapshot MetricsRegistry::Snapshot(double wall_s) const {
+MetricsSnapshot MetricsRegistry::Snapshot(double wall_s) {
     MetricsSnapshot s;
     s.run_id = run_id_;
     s.job_id = job_id_;
@@ -185,6 +200,19 @@ MetricsSnapshot MetricsRegistry::Snapshot(double wall_s) const {
     s.cpu_seconds_total = static_cast<double>(cpu_us_.load(std::memory_order_relaxed)) / 1e6;
     s.process_resident_memory_bytes = rss_bytes_.load(std::memory_order_relaxed);
 
+    if (have_rate_sample_) {
+        const double dw = wall_s - last_rate_wall_s_;
+        if (dw > 0.0) {
+            const uint64_t db = s.bytes_read_total - last_rate_bytes_;
+            s.achieved_rate_bytes = static_cast<double>(db) / dw;
+        }
+    } else if (wall_s > 0.0) {
+        s.achieved_rate_bytes = static_cast<double>(s.bytes_read_total) / wall_s;
+    }
+    have_rate_sample_ = true;
+    last_rate_wall_s_ = wall_s;
+    last_rate_bytes_ = s.bytes_read_total;
+
     auto add_err = [&](const char* name, const std::atomic<uint64_t>& c) {
         const uint64_t v = c.load(std::memory_order_relaxed);
         if (v > 0) s.errors_by_class[name] = v;
@@ -197,6 +225,17 @@ MetricsSnapshot MetricsRegistry::Snapshot(double wall_s) const {
     add_err("client_error", err_client_error_);
     add_err("redirect_loop", err_redirect_loop_);
     add_err("unknown", err_unknown_);
+
+    auto add_soft = [&](const char* name, const std::atomic<uint64_t>& c) {
+        const uint64_t v = c.load(std::memory_order_relaxed);
+        if (v > 0) s.soft_faults_by_kind[name] = v;
+    };
+    add_soft("connection", soft_connection_);
+    add_soft("timeout", soft_timeout_);
+    add_soft("tls_auth", soft_tls_auth_);
+    add_soft("io", soft_io_);
+    add_soft("redirect", soft_redirect_);
+    add_soft("other", soft_other_);
     return s;
 }
 

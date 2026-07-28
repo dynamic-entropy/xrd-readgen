@@ -40,11 +40,13 @@ json SnapshotToJsonl(const MetricsSnapshot& s) {
     j["readgen_sessions_total"] = {{"ok", s.sessions_ok}, {"fail", s.sessions_fail}};
     j["readgen_read_ops_total"] = s.read_ops_total;
     j["readgen_target_rate_bytes"] = s.target_rate_bytes;
+    j["readgen_achieved_rate_bytes"] = s.achieved_rate_bytes;
     j["readgen_open_seconds"] = HistogramToJson(s.open_seconds);
     j["readgen_ttfb_seconds"] = HistogramToJson(s.ttfb_seconds);
     j["readgen_read_seconds"] = HistogramToJson(s.read_seconds);
     j["readgen_redirects_per_open"] = HistogramToJson(s.redirects_per_open);
     j["readgen_errors_total"] = s.errors_by_class;
+    j["readgen_soft_faults_total"] = s.soft_faults_by_kind;
     j["readgen_inflight_reads"] = s.inflight_reads;
     j["readgen_peak_inflight"] = s.peak_inflight;
     j["readgen_workers_configured"] = s.workers_configured;
@@ -104,6 +106,7 @@ void FileSink::WriteResult(const MetricsSnapshot& snap, double cpu_seconds_at_st
     j["peak_inflight"] = snap.peak_inflight;
     j["workers"] = snap.workers_configured;
     j["errors"] = snap.errors_by_class;
+    j["soft_faults"] = snap.soft_faults_by_kind;
     j["latency"] = {{"open_seconds", LatencyPercentiles(snap.open_seconds)},
                     {"ttfb_seconds", LatencyPercentiles(snap.ttfb_seconds)},
                     {"read_seconds", LatencyPercentiles(snap.read_seconds)},

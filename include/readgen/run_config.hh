@@ -34,6 +34,11 @@ struct RunConfig {
     std::string job_id;       // empty → hostname or "local"
     bool write_results = true;  // --no-results disables FileSink
     std::string target = "default";  // label; single-target CLI
+
+    // Pushgateway (Chunk 4) — empty disables push. Observability stack is external.
+    std::string pushgateway_url;
+    std::string pushgateway_job = "xrd-readgen";
+    bool pushgateway_keep = false;  // if true, skip DELETE on exit (debug / short smoke)
 };
 
 const char* PatternTypeName(PatternType t);

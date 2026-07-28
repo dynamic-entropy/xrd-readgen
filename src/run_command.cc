@@ -5,11 +5,14 @@
 #include "readgen/file_sink.hh"
 #include "readgen/inflight.hh"
 #include "readgen/metrics.hh"
+#include "readgen/pushgateway_sink.hh"
 #include "readgen/scheduler.hh"
+#include "readgen/soft_fault_log.hh"
 #include "readgen/token_bucket.hh"
 #include "readgen/units.hh"
 
 #include <XrdVersion.hh>
+#include <curl/curl.h>
 
 #include <algorithm>
 #include <atomic>
@@ -75,6 +78,11 @@ void PrintDryRun(const RunConfig& cfg) {
     std::printf("seed:           %" PRIu64 "\n", cfg.seed);
     std::printf("results_dir:    %s\n", cfg.write_results ? cfg.results_dir.c_str() : "(disabled)");
     std::printf("snapshot:       %s\n", FormatDuration(cfg.snapshot_interval_s).c_str());
+    std::printf("pushgateway:    %s\n",
+                cfg.pushgateway_url.empty() ? "(disabled)" : cfg.pushgateway_url.c_str());
+    if (!cfg.pushgateway_url.empty()) {
+        std::printf("push_job:       %s\n", cfg.pushgateway_job.c_str());
+    }
     std::printf("dry_run:        true (no I/O)\n");
     if (!cfg.files.empty()) {
         std::printf("example URL:    %s\n", JoinUrl(cfg.endpoint, cfg.files.front()).c_str());
@@ -91,13 +99,22 @@ struct RunStats {
 };
 
 int RunEngine(const RunConfig& cfg) {
-    // Burst must cover one session charge; default 1s-of-rate is too small when
-    // --max-bytes is large (Acquire would wait until deadline and transfer 0).
-    const uint64_t burst =
+    // Bias the limiter slightly above --rate so open/redirect idle and soft
+    // faults don't leave achieved chronically under target. Metrics still
+    // report the configured target; overshoot of a few percent is intentional.
+    constexpr double kRateOvershoot = 1.10;
+    const uint64_t bucket_rate =
         cfg.target_rate_bps == 0
             ? 0
-            : std::max(cfg.target_rate_bps, cfg.max_bytes > 0 ? cfg.max_bytes : cfg.target_rate_bps);
-    TokenBucket bucket(cfg.target_rate_bps, burst);
+            : static_cast<uint64_t>(static_cast<double>(cfg.target_rate_bps) * kRateOvershoot);
+    // Burst must cover one session charge; default 1s-of-rate is too small when
+    // --max-bytes is large (Acquire would wait until deadline and transfer 0).
+    // Extra headroom (2s of bucket rate) lets the pipeline catch up after slow opens.
+    const uint64_t burst =
+        bucket_rate == 0
+            ? 0
+            : std::max({bucket_rate * 2, cfg.max_bytes > 0 ? cfg.max_bytes : bucket_rate, bucket_rate});
+    TokenBucket bucket(bucket_rate, burst);
     InFlightSemaphore inflight(cfg.workers);
     Scheduler sched(cfg);
     RunStats stats;
@@ -106,8 +123,13 @@ int RunEngine(const RunConfig& cfg) {
     const std::string job_id = cfg.job_id.empty() ? DefaultJobId() : cfg.job_id;
     registry.SetLabels(cfg.run_id, job_id, cfg.target, cfg.endpoint);
     registry.SetConfigGauges(cfg.target_rate_bps, cfg.workers);
+    SoftFaultLogOut::Install(&registry);
+    struct SoftFaultGuard {
+        ~SoftFaultGuard() { SoftFaultLogOut::TearDown(); }
+    } soft_fault_guard;
 
     std::unique_ptr<FileSink> sink;
+    std::unique_ptr<PushgatewaySink> push;
     double cpu_at_start = 0.0;
     if (cfg.write_results) {
         RunInfoMeta meta;
@@ -123,9 +145,22 @@ int RunEngine(const RunConfig& cfg) {
             std::fprintf(stderr, "error: %s\n", e.what());
             return 2;
         }
+        std::fprintf(stderr, "results: %s\n", sink->run_dir().c_str());
+    }
+    if (!cfg.pushgateway_url.empty()) {
+        curl_global_init(CURL_GLOBAL_DEFAULT);
+        try {
+            push = std::make_unique<PushgatewaySink>(cfg.pushgateway_url, cfg.pushgateway_job);
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "error: %s\n", e.what());
+            return 2;
+        }
+        std::fprintf(stderr, "pushgateway: %s (job=%s instance=%s)\n", cfg.pushgateway_url.c_str(),
+                     cfg.pushgateway_job.c_str(), job_id.c_str());
+    }
+    if (sink || push) {
         registry.SampleProc();
         cpu_at_start = SampleProcess().cpu_seconds;
-        std::fprintf(stderr, "results: %s\n", sink->run_dir().c_str());
     }
 
     std::atomic<uint64_t> live{0};
@@ -141,13 +176,19 @@ int RunEngine(const RunConfig& cfg) {
                  PatternTypeName(cfg.pattern), cfg.files.size());
 
     auto maybe_snapshot = [&](bool force) {
-        if (!sink) return;
+        if (!sink && !push) return;
         const auto now = Clock::now();
         if (!force && now < next_snap) return;
         registry.SampleProc();
         registry.SetInflight(live.load(std::memory_order_relaxed), inflight.peak());
         const double wall = std::chrono::duration<double>(now - t0).count();
-        sink->WriteSnapshot(registry.Snapshot(wall));
+        const auto snap = registry.Snapshot(wall);
+        if (sink) sink->WriteSnapshot(snap);
+        if (push) {
+            if (!push->Push(snap)) {
+                std::fprintf(stderr, "warning: pushgateway push failed\n");
+            }
+        }
         next_snap = now + std::chrono::duration_cast<Clock::duration>(
                               std::chrono::duration<double>(cfg.snapshot_interval_s));
     };
@@ -221,15 +262,28 @@ int RunEngine(const RunConfig& cfg) {
         errors = stats.errors;
     }
 
-    if (sink) {
+    if (sink || push) {
         registry.SampleProc();
         registry.SetInflight(live.load(std::memory_order_relaxed), inflight.peak());
         const auto final_snap = registry.Snapshot(elapsed);
-        try {
-            sink->WriteSnapshot(final_snap);
-            sink->WriteResult(final_snap, cpu_at_start);
-        } catch (const std::exception& e) {
-            std::fprintf(stderr, "warning: results write failed: %s\n", e.what());
+        if (sink) {
+            try {
+                sink->WriteSnapshot(final_snap);
+                sink->WriteResult(final_snap, cpu_at_start);
+            } catch (const std::exception& e) {
+                std::fprintf(stderr, "warning: results write failed: %s\n", e.what());
+            }
+        }
+        if (push) {
+            if (!push->Push(final_snap)) {
+                std::fprintf(stderr, "warning: final pushgateway push failed\n");
+            }
+            if (!cfg.pushgateway_keep) {
+                push->Finish(job_id);
+            } else {
+                std::fprintf(stderr, "pushgateway: keeping group job=%s instance=%s\n",
+                             cfg.pushgateway_job.c_str(), job_id.c_str());
+            }
         }
     }
 
@@ -247,10 +301,20 @@ int RunEngine(const RunConfig& cfg) {
     if (cfg.target_rate_bps) std::printf("target:         %.2f MiB/s\n", target_mib_s);
     std::printf("inflight peak:  %" PRIu32 " / %" PRIu32 "\n", inflight.peak(), inflight.max());
     if (sink) std::printf("results:        %s\n", sink->run_dir().c_str());
+    if (push) std::printf("pushgateway:    %s\n", cfg.pushgateway_url.c_str());
     if (!errors.empty()) {
         std::printf("errors:\n");
         for (const auto& e : errors) {
             std::printf("  %-14s %" PRIu64 "\n", ErrorClassName(e.first), e.second);
+        }
+    }
+    {
+        const auto soft = registry.Snapshot(elapsed).soft_faults_by_kind;
+        if (!soft.empty()) {
+            std::printf("soft_faults:\n");
+            for (const auto& e : soft) {
+                std::printf("  %-14s %" PRIu64 "\n", e.first.c_str(), e.second);
+            }
         }
     }
 

@@ -84,6 +84,12 @@ int main(int argc, char** argv) {
     run_cmd->add_option("--results-dir", run_cfg.results_dir, "Directory for metrics.jsonl + result.json");
     run_cmd->add_option("--snapshot-interval", snapshot_str, "Metrics JSONL snapshot interval");
     run_cmd->add_flag("--no-results", no_results, "Disable FileSink output");
+    run_cmd->add_option("--pushgateway", run_cfg.pushgateway_url,
+                        "Push metrics to Pushgateway base URL (e.g. http://xrdmon.cern.ch:9091)");
+    run_cmd->add_option("--pushgateway-job", run_cfg.pushgateway_job,
+                        "Pushgateway job label (default xrd-readgen)");
+    run_cmd->add_flag("--pushgateway-keep", run_cfg.pushgateway_keep,
+                      "Do not DELETE Pushgateway group on exit");
     run_cmd->add_flag("--dry-run", run_cfg.dry_run, "Print resolved config; no I/O");
 
     auto* validate_cmd = app.add_subcommand("validate", "Validate a workload menu");

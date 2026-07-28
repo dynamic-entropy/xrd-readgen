@@ -14,6 +14,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 find_package(XRootD REQUIRED COMPONENTS CLIENT)
+find_package(CURL REQUIRED)
 
 include(FetchContent)
 FetchContent_Declare(cli11
@@ -37,7 +38,10 @@ set(READGEN_SOURCES
   src/error_classifier.cc
   src/scheduler.cc
   src/metrics.cc
-  src/file_sink.cc)
+  src/file_sink.cc
+  src/prom_encode.cc
+  src/pushgateway_sink.cc
+  src/soft_fault_log.cc)
 
 add_executable(xrd-readgen
   src/main.cc
@@ -53,7 +57,8 @@ target_compile_options(xrd-readgen PRIVATE -Wall -Wextra)
 target_link_libraries(xrd-readgen PRIVATE
   XRootD::XrdCl
   CLI11::CLI11
-  nlohmann_json::nlohmann_json)
+  nlohmann_json::nlohmann_json
+  CURL::libcurl)
 
 install(TARGETS xrd-readgen RUNTIME DESTINATION bin)
 
@@ -74,18 +79,23 @@ add_executable(xrd-readgen-tests
   tests/test_auto_max_bytes.cc
   tests/test_metrics.cc
   tests/test_file_sink.cc
+  tests/test_prom_encode.cc
+  tests/test_soft_fault.cc
   src/units.cc
   src/token_bucket.cc
   src/error_classifier.cc
   src/run_config.cc
   src/metrics.cc
-  src/file_sink.cc)
+  src/file_sink.cc
+  src/prom_encode.cc
+  src/soft_fault_log.cc)
 
 target_include_directories(xrd-readgen-tests PRIVATE include)
 target_compile_options(xrd-readgen-tests PRIVATE -Wall -Wextra)
 target_link_libraries(xrd-readgen-tests PRIVATE
   GTest::gtest_main
-  nlohmann_json::nlohmann_json)
+  nlohmann_json::nlohmann_json
+  XRootD::XrdCl)
 
 include(GoogleTest)
 gtest_discover_tests(xrd-readgen-tests)

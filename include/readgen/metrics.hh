@@ -40,6 +40,10 @@ struct MetricsSnapshot {
     uint64_t sessions_fail = 0;
     uint64_t read_ops_total = 0;
     double target_rate_bytes = 0.0;
+    // Instantaneous achieved rate over the last snapshot interval (bytes/s),
+    // using the same steady_clock elapsed time as wall_s / run duration.
+    // Prefer this over Prometheus rate(counter) when scraping Pushgateway.
+    double achieved_rate_bytes = 0.0;
 
     HistogramSnapshot open_seconds;
     HistogramSnapshot ttfb_seconds;
@@ -47,6 +51,7 @@ struct MetricsSnapshot {
     HistogramSnapshot redirects_per_open;
 
     std::map<std::string, uint64_t> errors_by_class;
+    std::map<std::string, uint64_t> soft_faults_by_kind;
 
     uint64_t inflight_reads = 0;
     uint64_t peak_inflight = 0;
@@ -86,12 +91,16 @@ public:
     void ObserveSessionOk(uint64_t bytes, uint64_t ops, double open_s, double ttfb_s, double read_s,
                           double redirects);
     void ObserveSessionFail(const std::string& error_class);
+    // XrdCl Error-level log lines (may not fail a session — soft faults).
+    void ObserveSoftFault(const std::string& kind);
     void SetInflight(uint64_t live, uint64_t peak);
 
     // Refresh CPU/RSS from /proc (call on snapshot thread).
     void SampleProc();
 
-    MetricsSnapshot Snapshot(double wall_s) const;
+    // Build a snapshot. Non-const: updates interval achieved_rate_bytes from the
+    // previous Snapshot() call using wall_s (steady elapsed) and bytes counters.
+    MetricsSnapshot Snapshot(double wall_s);
 
     const std::string& run_id() const { return run_id_; }
     const std::string& job_id() const { return job_id_; }
@@ -126,8 +135,20 @@ private:
     std::atomic<uint64_t> err_redirect_loop_{0};
     std::atomic<uint64_t> err_unknown_{0};
 
+    std::atomic<uint64_t> soft_connection_{0};
+    std::atomic<uint64_t> soft_timeout_{0};
+    std::atomic<uint64_t> soft_tls_auth_{0};
+    std::atomic<uint64_t> soft_io_{0};
+    std::atomic<uint64_t> soft_redirect_{0};
+    std::atomic<uint64_t> soft_other_{0};
+
     std::atomic<uint64_t> cpu_us_{0};  // process CPU as microseconds
     std::atomic<uint64_t> rss_bytes_{0};
+
+    // Last Snapshot() sample for interval achieved_rate_bytes (main thread only).
+    bool have_rate_sample_ = false;
+    double last_rate_wall_s_ = 0.0;
+    uint64_t last_rate_bytes_ = 0;
 };
 
 }  // namespace readgen
