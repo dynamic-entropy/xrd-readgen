@@ -176,6 +176,18 @@ TEST(WorkloadSpec, ToRunConfigMapsFields) {
     EXPECT_EQ(cfg.seed, 42u);
     EXPECT_TRUE(cfg.max_bytes_auto);
     EXPECT_FALSE(cfg.files.empty());
+    EXPECT_FALSE(cfg.filelist_path.empty());
+    EXPECT_DOUBLE_EQ(cfg.session_timeout_s, r.resolved.client_tuning.session_timeout_s);
+    EXPECT_EQ(cfg.connection_window_s, r.resolved.client_tuning.connection_window_s);
+    EXPECT_EQ(cfg.connection_retry, r.resolved.client_tuning.connection_retry);
+    EXPECT_EQ(cfg.request_timeout_s, r.resolved.client_tuning.request_timeout_s);
+    EXPECT_EQ(cfg.results_dir, r.resolved.sinks.results_dir);
+    EXPECT_DOUBLE_EQ(cfg.snapshot_interval_s, r.resolved.sinks.snapshot_interval_s);
+    EXPECT_EQ(cfg.job_id, r.resolved.sinks.job_id);
+    EXPECT_EQ(cfg.write_results, r.resolved.sinks.write_results);
+    EXPECT_EQ(cfg.pushgateway_url, r.resolved.sinks.pushgateway.url);
+    EXPECT_EQ(cfg.pushgateway_job, r.resolved.sinks.pushgateway.job);
+    EXPECT_EQ(cfg.pushgateway_keep, r.resolved.sinks.pushgateway.keep);
 }
 
 struct InvalidCase {

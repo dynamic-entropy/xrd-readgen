@@ -12,9 +12,11 @@
 #include "readgen/run_command.hh"
 #include "readgen/run_config.hh"
 #include "readgen/units.hh"
+#include "readgen/workload_run_command.hh"
 #include "readgen/workload_spec.hh"
 
 #include <fstream>
+#include <vector>
 
 namespace {
 
@@ -29,6 +31,13 @@ readgen::PatternType ParsePattern(const std::string& s) {
     if (s == "vector") return readgen::PatternType::Vector;
     if (s == "mixed") return readgen::PatternType::Mixed;
     throw std::runtime_error("pattern must be sequential|random|vector|mixed");
+}
+
+bool AnyCounted(const std::vector<CLI::Option*>& opts) {
+    for (const auto* o : opts) {
+        if (o && o->count() > 0) return true;
+    }
+    return false;
 }
 
 }  // namespace
@@ -49,7 +58,7 @@ int main(int argc, char** argv) {
     read_cmd->add_option("--vector", read_opts.vector_chunks, "Use VectorRead with N chunks per op");
     read_cmd->add_flag("--json", read_opts.json, "JSON output");
 
-    // run (CLI-driven; menu YAML deferred)
+    // run: legacy flags OR workload JSON (mutually exclusive modes)
     readgen::RunConfig run_cfg;
     std::string duration_str = "30s";
     std::string rate_str;
@@ -60,46 +69,73 @@ int main(int argc, char** argv) {
     std::string snapshot_str = "15s";
     std::string session_timeout_str = "60s";
     bool no_results = false;
+    std::string run_workload;
+    std::string run_target;
+    bool run_skip_auth = false;
 
-    auto* run_cmd = app.add_subcommand("run", "Execute a sustained read workload");
-    run_cmd->add_option("--endpoint", run_cfg.endpoint, "root:// endpoint (e.g. root://localhost:10945/)")
-        ->required();
-    run_cmd->add_option("--filelist", filelist_path, "File with one path per line")->required();
-    run_cmd->add_option("--duration", duration_str, "Run duration (e.g. 30s, 5m)");
-    run_cmd->add_option("--rate", rate_str,
-                        "Target rate (prefer MBps/Gbps SI; also MiBps/Mbps); omit to uncap");
-    run_cmd->add_option("--workers", run_cfg.workers, "Max in-flight sessions (default 16)")
-        ->check(CLI::Range(1u, 100000u));
-    run_cmd->add_option("--pattern", pattern_str, "sequential|random|vector|mixed");
-    run_cmd->add_option("--chunk-size", chunk_str, "Bytes per read chunk (e.g. 1MiB or 1MB)");
-    run_cmd->add_option("--vector-chunks", run_cfg.vector_chunks, "Chunks per VectorRead");
-    run_cmd->add_option("--vector-fraction", run_cfg.vector_fraction,
-                        "Mixed pattern: fraction of sessions using VectorRead (default 0.4)")
-        ->check(CLI::Range(0.0, 1.0));
-    run_cmd->add_option("--file-fraction", run_cfg.file_fraction, "Fraction of each file to read");
-    run_cmd->add_option("--max-bytes", max_bytes_str,
-                        "Session byte cap (SIZE, 0=none, or 'auto' from --rate/--workers; default auto)");
-    run_cmd->add_option("--session-timeout", session_timeout_str,
-                        "Per-session wall timeout (0 to disable; default 60s)");
-    run_cmd->add_option("--connection-window", run_cfg.connection_window_s,
-                        "XrdCl ConnectionWindow seconds (default 15; XrdCl default is 120)");
-    run_cmd->add_option("--connection-retry", run_cfg.connection_retry,
-                        "XrdCl ConnectionRetry count (default 2)");
-    run_cmd->add_option("--request-timeout", run_cfg.request_timeout_s,
-                        "XrdCl RequestTimeout seconds (default 60)");
-    run_cmd->add_option("--seed", run_cfg.seed, "RNG seed");
-    run_cmd->add_option("--run-id", run_cfg.run_id, "Run identifier");
-    run_cmd->add_option("--job-id", run_cfg.job_id, "Job/instance label (default: hostname)");
-    run_cmd->add_option("--results-dir", run_cfg.results_dir, "Directory for metrics.jsonl + result.json");
-    run_cmd->add_option("--snapshot-interval", snapshot_str, "Metrics JSONL snapshot interval");
-    run_cmd->add_flag("--no-results", no_results, "Disable FileSink output");
-    run_cmd->add_option("--pushgateway", run_cfg.pushgateway_url,
-                        "Push metrics to Pushgateway base URL (e.g. http://xrdmon.cern.ch:9091)");
-    run_cmd->add_option("--pushgateway-job", run_cfg.pushgateway_job,
-                        "Pushgateway job label (default xrd-readgen)");
-    run_cmd->add_flag("--pushgateway-keep", run_cfg.pushgateway_keep,
-                      "Do not DELETE Pushgateway group on exit");
+    auto* run_cmd = app.add_subcommand(
+        "run", "Execute a sustained read workload (CLI flags or workload JSON)");
+    auto* run_workload_opt =
+        run_cmd->add_option("workload", run_workload, "workload JSON (workload mode)");
+    auto* endpoint_opt =
+        run_cmd->add_option("--endpoint", run_cfg.endpoint,
+                            "root:// endpoint (e.g. root://localhost:10945/)");
+    auto* filelist_opt =
+        run_cmd->add_option("--filelist", filelist_path, "File with one path per line");
+    auto* duration_opt = run_cmd->add_option("--duration", duration_str, "Run duration (e.g. 30s, 5m)");
+    auto* rate_opt = run_cmd->add_option("--rate", rate_str,
+                                         "Target rate (prefer MBps/Gbps SI; also MiBps/Mbps); omit to uncap");
+    auto* workers_opt =
+        run_cmd->add_option("--workers", run_cfg.workers, "Max in-flight sessions (default 16)")
+            ->check(CLI::Range(1u, 100000u));
+    auto* pattern_opt = run_cmd->add_option("--pattern", pattern_str, "sequential|random|vector|mixed");
+    auto* chunk_opt =
+        run_cmd->add_option("--chunk-size", chunk_str, "Bytes per read chunk (e.g. 1MiB or 1MB)");
+    auto* vector_chunks_opt =
+        run_cmd->add_option("--vector-chunks", run_cfg.vector_chunks, "Chunks per VectorRead");
+    auto* vector_fraction_opt =
+        run_cmd->add_option("--vector-fraction", run_cfg.vector_fraction,
+                            "Mixed pattern: fraction of sessions using VectorRead (default 0.4)")
+            ->check(CLI::Range(0.0, 1.0));
+    auto* file_fraction_opt =
+        run_cmd->add_option("--file-fraction", run_cfg.file_fraction, "Fraction of each file to read");
+    auto* max_bytes_opt = run_cmd->add_option(
+        "--max-bytes", max_bytes_str,
+        "Session byte cap (SIZE, 0=none, or 'auto' from --rate/--workers; default auto)");
+    auto* session_timeout_opt = run_cmd->add_option(
+        "--session-timeout", session_timeout_str, "Per-session wall timeout (0 to disable; default 60s)");
+    auto* connection_window_opt = run_cmd->add_option(
+        "--connection-window", run_cfg.connection_window_s,
+        "XrdCl ConnectionWindow seconds (default 15; XrdCl default is 120)");
+    auto* connection_retry_opt =
+        run_cmd->add_option("--connection-retry", run_cfg.connection_retry,
+                            "XrdCl ConnectionRetry count (default 2)");
+    auto* request_timeout_opt =
+        run_cmd->add_option("--request-timeout", run_cfg.request_timeout_s,
+                            "XrdCl RequestTimeout seconds (default 60)");
+    auto* seed_opt = run_cmd->add_option("--seed", run_cfg.seed, "RNG seed");
+    auto* run_id_opt = run_cmd->add_option("--run-id", run_cfg.run_id, "Run identifier");
+    auto* job_id_opt =
+        run_cmd->add_option("--job-id", run_cfg.job_id, "Job/instance label (default: hostname)");
+    auto* results_dir_opt = run_cmd->add_option("--results-dir", run_cfg.results_dir,
+                                                "Directory for metrics.jsonl + result.json");
+    auto* snapshot_opt =
+        run_cmd->add_option("--snapshot-interval", snapshot_str, "Metrics JSONL snapshot interval");
+    auto* no_results_opt = run_cmd->add_flag("--no-results", no_results, "Disable FileSink output");
+    auto* pushgateway_opt = run_cmd->add_option(
+        "--pushgateway", run_cfg.pushgateway_url,
+        "Push metrics to Pushgateway base URL (e.g. http://xrdmon.cern.ch:9091)");
+    auto* pushgateway_job_opt =
+        run_cmd->add_option("--pushgateway-job", run_cfg.pushgateway_job,
+                            "Pushgateway job label (default xrd-readgen)");
+    auto* pushgateway_keep_opt = run_cmd->add_flag(
+        "--pushgateway-keep", run_cfg.pushgateway_keep, "Do not DELETE Pushgateway group on exit");
     run_cmd->add_flag("--dry-run", run_cfg.dry_run, "Print resolved config; no I/O");
+    auto* run_target_opt =
+        run_cmd->add_option("--target", run_target, "Workload mode: target name (required if multi-target)");
+    auto* run_skip_auth_opt = run_cmd->add_flag(
+        "--skip-auth-check", run_skip_auth, "Workload mode: skip x509 proxy preflight (local only)");
+    (void)run_workload_opt;
 
     auto* validate_cmd = app.add_subcommand("validate", "Validate a workload JSON (no XRootD I/O)");
     std::string workload;
@@ -126,6 +162,40 @@ int main(int argc, char** argv) {
     if (read_cmd->parsed()) return readgen::RunReadCommand(read_opts);
 
     if (run_cmd->parsed()) {
+        const std::vector<CLI::Option*> legacy_config_opts = {
+            endpoint_opt,         filelist_opt,         duration_opt,       rate_opt,
+            workers_opt,          pattern_opt,          chunk_opt,          vector_chunks_opt,
+            vector_fraction_opt,  file_fraction_opt,    max_bytes_opt,      session_timeout_opt,
+            connection_window_opt, connection_retry_opt, request_timeout_opt, seed_opt,
+            run_id_opt,           job_id_opt,           results_dir_opt,    snapshot_opt,
+            no_results_opt,       pushgateway_opt,      pushgateway_job_opt, pushgateway_keep_opt};
+
+        if (!run_workload.empty()) {
+            if (AnyCounted(legacy_config_opts)) {
+                std::fprintf(stderr,
+                             "error: workload mode rejects legacy run config flags "
+                             "(edit the JSON, or omit the workload path)\n");
+                return 2;
+            }
+            readgen::WorkloadRunOptions wl_opts;
+            wl_opts.workload_path = run_workload;
+            wl_opts.target = run_target;
+            wl_opts.dry_run = run_cfg.dry_run;
+            wl_opts.skip_auth_check = run_skip_auth;
+            return readgen::RunWorkloadCommand(wl_opts);
+        }
+
+        if (run_target_opt->count() > 0 || run_skip_auth_opt->count() > 0) {
+            std::fprintf(stderr,
+                         "error: --target and --skip-auth-check require a workload JSON\n");
+            return 2;
+        }
+        if (endpoint_opt->count() == 0 || filelist_opt->count() == 0) {
+            std::fprintf(stderr,
+                         "error: pass a workload JSON, or both --endpoint and --filelist\n");
+            return 2;
+        }
+
         try {
             run_cfg.duration_s = readgen::ParseDurationString(duration_str);
             run_cfg.chunk_size = static_cast<uint32_t>(readgen::ParseSizeString(chunk_str));

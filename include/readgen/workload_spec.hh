@@ -95,7 +95,7 @@ ValidateResult ValidateWorkloadJson(const nlohmann::json& j, const std::string& 
 // workload file's parent directory.
 ValidateResult ValidateWorkloadFile(const std::string& path);
 
-// Map one target into the existing engine RunConfig (Chunk 2.3 will call this).
+// Map one target into the existing engine RunConfig (used by workload-driven run).
 RunConfig ToRunConfig(const WorkloadSpec& wl, const TargetSpec& target);
 
 }  // namespace readgen

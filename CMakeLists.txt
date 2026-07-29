@@ -46,6 +46,7 @@ set(READGEN_SOURCES
   src/workload_spec.cc
   src/auth_check.cc
   src/probe_command.cc
+  src/workload_run_command.cc
   src/xrdcl_env.cc)
 
 add_executable(xrd-readgen
@@ -90,6 +91,8 @@ add_executable(xrd-readgen-tests
   tests/test_workload_spec.cc
   tests/test_auth_check.cc
   tests/test_probe_command.cc
+  tests/test_workload_run_command.cc
+  tests/stub_run_command.cc
   src/units.cc
   src/token_bucket.cc
   src/error_classifier.cc
@@ -101,6 +104,7 @@ add_executable(xrd-readgen-tests
   src/workload_spec.cc
   src/auth_check.cc
   src/probe_command.cc
+  src/workload_run_command.cc
   src/xrdcl_env.cc
   src/inflight.cc
   src/file_session.cc)

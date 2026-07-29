@@ -5,3 +5,4 @@ filelists/
 compile_commands.json
 proxy
 results/
+workloads/
