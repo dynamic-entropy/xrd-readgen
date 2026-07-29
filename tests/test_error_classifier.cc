@@ -32,6 +32,13 @@ TEST(ErrorClassifier, TlsConnection) {
     EXPECT_EQ(ClassifyXRootDError(0, 0, "Failed to do TLS connect: error_ssl"), ErrorClass::Connection);
 }
 
+TEST(ErrorClassifier, Trust) {
+    EXPECT_EQ(ClassifyXRootDError(0, 0, "certificate verify failed"), ErrorClass::Trust);
+    EXPECT_EQ(ClassifyXRootDError(0, 0, "unable to get local issuer certificate"), ErrorClass::Trust);
+    EXPECT_EQ(ClassifyXRootDError(0, 0, "unknown ca"), ErrorClass::Trust);
+    EXPECT_STREQ(ErrorClassName(ErrorClass::Trust), "trust");
+}
+
 TEST(ErrorClassifier, Names) {
     EXPECT_STREQ(ErrorClassName(ErrorClass::Auth), "auth");
     EXPECT_STREQ(ErrorClassName(ErrorClass::None), "none");

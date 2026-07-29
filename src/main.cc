@@ -7,6 +7,7 @@
 #include <string>
 
 #include "readgen/build_info.hh"
+#include "readgen/probe_command.hh"
 #include "readgen/read_command.hh"
 #include "readgen/run_command.hh"
 #include "readgen/run_config.hh"
@@ -105,7 +106,18 @@ int main(int argc, char** argv) {
     std::string validate_out;
     validate_cmd->add_option("workload", workload, "workload JSON")->required();
     validate_cmd->add_option("--out", validate_out, "Write canonical resolved JSON to PATH");
-    auto* probe_cmd = app.add_subcommand("probe", "Pre-flight open+TTFB probe of a filelist");
+
+    readgen::ProbeOptions probe_opts;
+    auto* probe_cmd = app.add_subcommand("probe", "Pre-flight Open+TTFB probe of a workload");
+    probe_cmd->add_option("workload", probe_opts.workload_path, "workload JSON")->required();
+    probe_cmd->add_option("--target", probe_opts.target, "Probe only this target name");
+    probe_cmd->add_option("--limit", probe_opts.limit, "Max files per target (default: all)");
+    probe_cmd->add_option("--concurrency", probe_opts.concurrency, "Max in-flight probes (default 4)")
+        ->check(CLI::Range(1u, 100000u));
+    probe_cmd->add_flag("--json", probe_opts.json, "JSON probe report on stdout");
+    probe_cmd->add_flag("--skip-auth-check", probe_opts.skip_auth_check,
+                       "Skip x509 proxy preflight (local GSI-less rehearsal)");
+
     auto* report_cmd = app.add_subcommand("report", "Summarize a run from its result files");
     auto* version_cmd = app.add_subcommand("version", "Version info");
 
@@ -168,7 +180,7 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "workload_hash=%s\n", result.workload_hash.c_str());
         return 0;
     }
-    if (probe_cmd->parsed()) return NotImplemented("probe", "coming later");
+    if (probe_cmd->parsed()) return readgen::RunProbeCommand(probe_opts);
     if (report_cmd->parsed()) return NotImplemented("report", "coming later");
     if (version_cmd->parsed()) {
         std::printf("xrd-readgen %s (%s, XrdCl %s)\n", READGEN_VERSION, readgen::BuildArch(),

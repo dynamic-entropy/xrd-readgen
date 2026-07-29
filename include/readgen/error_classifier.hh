@@ -15,6 +15,7 @@ enum class ErrorClass {
     NotFound,
     ClientError,
     RedirectLoop,
+    Trust,  // CA / certificate verification failures
     Unknown,
 };
 

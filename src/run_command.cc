@@ -11,8 +11,8 @@
 #include "readgen/soft_fault_log.hh"
 #include "readgen/token_bucket.hh"
 #include "readgen/units.hh"
+#include "readgen/xrdcl_env.hh"
 
-#include <XrdCl/XrdClDefaultEnv.hh>
 #include <XrdVersion.hh>
 #include <curl/curl.h>
 
@@ -50,20 +50,6 @@ std::string DescribeTargetRate(const RunConfig& cfg) {
     std::string s = FormatRate(cfg.target_rate_bps);
     if (!cfg.target_rate_input.empty()) s += " (from '" + cfg.target_rate_input + "')";
     return s;
-}
-
-void ApplyXrdClTimeouts(const RunConfig& cfg) {
-    XrdCl::Env* env = XrdCl::DefaultEnv::GetEnv();
-    if (!env) return;
-    if (cfg.connection_window_s > 0) env->PutInt("ConnectionWindow", cfg.connection_window_s);
-    if (cfg.connection_retry >= 0) env->PutInt("ConnectionRetry", cfg.connection_retry);
-    if (cfg.request_timeout_s > 0) env->PutInt("RequestTimeout", cfg.request_timeout_s);
-    std::fprintf(stderr,
-                 "xrdcl timeouts: ConnectionWindow=%ds ConnectionRetry=%d RequestTimeout=%ds "
-                 "session_timeout=%s\n",
-                 cfg.connection_window_s, cfg.connection_retry, cfg.request_timeout_s,
-                 cfg.session_timeout_s > 0 ? FormatDuration(cfg.session_timeout_s).c_str()
-                                            : "off");
 }
 
 void PrintDryRun(const RunConfig& cfg) {
@@ -104,7 +90,8 @@ void PrintDryRun(const RunConfig& cfg) {
 }
 
 int RunEngine(const RunConfig& cfg) {
-    ApplyXrdClTimeouts(cfg);
+    ApplyXrdClTimeouts(cfg.connection_window_s, cfg.connection_retry, cfg.request_timeout_s,
+                       cfg.session_timeout_s);
 
     // Burst covers a full worker pipeline so the rate limiter can admit a full
     // set of in-flight session charges without waiting on a 1-charge refill.

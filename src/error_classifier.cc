@@ -31,6 +31,8 @@ const char* ErrorClassName(ErrorClass c) {
             return "client_error";
         case ErrorClass::RedirectLoop:
             return "redirect_loop";
+        case ErrorClass::Trust:
+            return "trust";
         case ErrorClass::Unknown:
             return "unknown";
     }
@@ -64,6 +66,17 @@ ErrorClass ClassifyXRootDError(int status_code, int err_code, const std::string&
     if (msg.find("timeout") != std::string::npos || msg.find("timed out") != std::string::npos ||
         err_code == 110 /* ETIMEDOUT */) {
         return ErrorClass::Timeout;
+    }
+
+    // CA / certificate verification (before broad TLS/socket Connection match)
+    if (msg.find("certificate verify") != std::string::npos ||
+        msg.find("unable to get local issuer") != std::string::npos ||
+        msg.find("unknown ca") != std::string::npos ||
+        msg.find("self signed certificate") != std::string::npos ||
+        msg.find("certificate unknown") != std::string::npos ||
+        msg.find("sslv3 alert certificate") != std::string::npos ||
+        msg.find("x509_v_err") != std::string::npos) {
+        return ErrorClass::Trust;
     }
 
     // Transport / TLS / socket (FNAL handshakes often look like this)

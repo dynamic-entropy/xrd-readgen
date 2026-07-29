@@ -190,6 +190,14 @@ class FileSession : public std::enable_shared_from_this<FileSession> {
         result_.data_server = data_server_;
         result_.file_size = file_size_;
         result_.open_hosts = hops_;
+        // Preserve open/TTFB when available so failed probes still report latency.
+        if (t_open_.time_since_epoch().count() != 0) {
+            result_.open_ms = MsBetween(t_start_, t_open_);
+            if (ops_ > 0 && t_first_byte_.time_since_epoch().count() != 0) {
+                result_.ttfb_ms = MsBetween(t_open_, t_first_byte_);
+            }
+        }
+        result_.total_s = SecsBetween(t_start_, Clock::now());
     }
 
     // Marks the session done and fires on_done. Does NOT drop self_keep_: the

@@ -43,7 +43,10 @@ set(READGEN_SOURCES
   src/prom_encode.cc
   src/pushgateway_sink.cc
   src/soft_fault_log.cc
-  src/workload_spec.cc)
+  src/workload_spec.cc
+  src/auth_check.cc
+  src/probe_command.cc
+  src/xrdcl_env.cc)
 
 add_executable(xrd-readgen
   src/main.cc
@@ -85,6 +88,8 @@ add_executable(xrd-readgen-tests
   tests/test_prom_encode.cc
   tests/test_soft_fault.cc
   tests/test_workload_spec.cc
+  tests/test_auth_check.cc
+  tests/test_probe_command.cc
   src/units.cc
   src/token_bucket.cc
   src/error_classifier.cc
@@ -93,7 +98,12 @@ add_executable(xrd-readgen-tests
   src/file_sink.cc
   src/prom_encode.cc
   src/soft_fault_log.cc
-  src/workload_spec.cc)
+  src/workload_spec.cc
+  src/auth_check.cc
+  src/probe_command.cc
+  src/xrdcl_env.cc
+  src/inflight.cc
+  src/file_session.cc)
 
 target_include_directories(xrd-readgen-tests PRIVATE include)
 target_compile_options(xrd-readgen-tests PRIVATE -Wall -Wextra)
