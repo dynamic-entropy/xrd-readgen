@@ -32,11 +32,20 @@ Soft-fault counting requires XrdCl Error logs to be emitted (default / `XRD_LOGL
 
 ### Throughput on D1
 
-Prefer `readgen_achieved_rate_bytes` (gauge): bytes read over the last
-`--snapshot-interval`, divided by the generator’s `steady_clock` elapsed time
-(same clock as `--duration`). That matches JSONL / `result.json`, unlike
-`rate(readgen_bytes_read_total[…])` which uses Prometheus scrape/push wall time
-and looks like zeros+spikes against Pushgateway.
+Prefer `readgen_achieved_rate_bytes` (gauge): **cumulative**
+`bytes_read / elapsed` on the generator’s `steady_clock` (same as run-summary
+achieved). Stall bounds (`ConnectionWindow` / session timeout) keep drain tails
+short so elapsed stays a fair denominator.
+
+The achieved-vs-target panel uses **Y soft-min = 0** so a flat local run near
+target is not auto-zoomed into a fake “huge” oscillation. Rate panels use Grafana
+unit `Bps` (SI **MB/s**). Prefer CLI `--rate 35MBps` / `1Gbps` (SI); `MiBps` is
+accepted but the banner echoes the parsed SI rate (`41.94 MB/s (from '40MiBps')`).
+**Bytes per CPU-second** uses `decbytes` (bytes, not Bps) so a value like 303 MB
+means efficiency, not a 303 MB/s network rate.
+
+Defaults that bound stuck peers: `--session-timeout 60s`,
+`--connection-window 15`, `--connection-retry 2` (XrdCl ConnectionWindow default is 120).
 
 Re-import D1 after JSON updates. Use `--snapshot-interval` ≤ scrape interval (often 15s).
 

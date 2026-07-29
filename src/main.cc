@@ -6,22 +6,13 @@
 #include <stdexcept>
 #include <string>
 
+#include "readgen/build_info.hh"
 #include "readgen/read_command.hh"
 #include "readgen/run_command.hh"
 #include "readgen/run_config.hh"
 #include "readgen/units.hh"
 
 namespace {
-
-const char* BuildArch() {
-#if defined(__aarch64__) || defined(__arm64__)
-    return "aarch64";
-#elif defined(__x86_64__)
-    return "x86_64";
-#else
-    return "unknown";
-#endif
-}
 
 int NotImplemented(const char* cmd, const char* note) {
     std::fprintf(stderr, "%s: not implemented yet (%s)\n", cmd, note);
@@ -59,10 +50,11 @@ int main(int argc, char** argv) {
     std::string duration_str = "30s";
     std::string rate_str;
     std::string chunk_str = "1MiB";
-    std::string max_bytes_str;
+    std::string max_bytes_str = "auto";
     std::string pattern_str = "sequential";
     std::string filelist_path;
     std::string snapshot_str = "15s";
+    std::string session_timeout_str = "60s";
     bool no_results = false;
 
     auto* run_cmd = app.add_subcommand("run", "Execute a sustained read workload");
@@ -70,14 +62,27 @@ int main(int argc, char** argv) {
         ->required();
     run_cmd->add_option("--filelist", filelist_path, "File with one path per line")->required();
     run_cmd->add_option("--duration", duration_str, "Run duration (e.g. 30s, 5m)");
-    run_cmd->add_option("--rate", rate_str, "Target rate (e.g. 200MiBps); omit to uncap");
-    run_cmd->add_option("--workers", run_cfg.workers, "Max in-flight file sessions");
+    run_cmd->add_option("--rate", rate_str,
+                        "Target rate (prefer MBps/Gbps SI; also MiBps/Mbps); omit to uncap");
+    run_cmd->add_option("--workers", run_cfg.workers, "Max in-flight sessions (default 16)")
+        ->check(CLI::Range(1u, 100000u));
     run_cmd->add_option("--pattern", pattern_str, "sequential|random|vector|mixed");
-    run_cmd->add_option("--chunk-size", chunk_str, "Bytes per read chunk");
+    run_cmd->add_option("--chunk-size", chunk_str, "Bytes per read chunk (e.g. 1MiB or 1MB)");
     run_cmd->add_option("--vector-chunks", run_cfg.vector_chunks, "Chunks per VectorRead");
+    run_cmd->add_option("--vector-fraction", run_cfg.vector_fraction,
+                        "Mixed pattern: fraction of sessions using VectorRead (default 0.4)")
+        ->check(CLI::Range(0.0, 1.0));
     run_cmd->add_option("--file-fraction", run_cfg.file_fraction, "Fraction of each file to read");
     run_cmd->add_option("--max-bytes", max_bytes_str,
-                        "Hard cap bytes per session (SIZE or 'auto' from --rate/--workers)");
+                        "Session byte cap (SIZE, 0=none, or 'auto' from --rate/--workers; default auto)");
+    run_cmd->add_option("--session-timeout", session_timeout_str,
+                        "Per-session wall timeout (0 to disable; default 60s)");
+    run_cmd->add_option("--connection-window", run_cfg.connection_window_s,
+                        "XrdCl ConnectionWindow seconds (default 15; XrdCl default is 120)");
+    run_cmd->add_option("--connection-retry", run_cfg.connection_retry,
+                        "XrdCl ConnectionRetry count (default 2)");
+    run_cmd->add_option("--request-timeout", run_cfg.request_timeout_s,
+                        "XrdCl RequestTimeout seconds (default 60)");
     run_cmd->add_option("--seed", run_cfg.seed, "RNG seed");
     run_cmd->add_option("--run-id", run_cfg.run_id, "Run identifier");
     run_cmd->add_option("--job-id", run_cfg.job_id, "Job/instance label (default: hostname)");
@@ -107,18 +112,20 @@ int main(int argc, char** argv) {
         try {
             run_cfg.duration_s = readgen::ParseDurationString(duration_str);
             run_cfg.chunk_size = static_cast<uint32_t>(readgen::ParseSizeString(chunk_str));
-            if (!rate_str.empty()) run_cfg.target_rate_bps = readgen::ParseRateString(rate_str);
-            if (!max_bytes_str.empty()) {
-                if (max_bytes_str == "auto") {
-                    run_cfg.max_bytes_auto = true;
-                } else {
-                    run_cfg.max_bytes = readgen::ParseSizeString(max_bytes_str);
-                }
+            if (!rate_str.empty()) {
+                run_cfg.target_rate_input = rate_str;
+                run_cfg.target_rate_bps = readgen::ParseRateString(rate_str);
+            }
+            if (max_bytes_str == "auto") {
+                run_cfg.max_bytes_auto = true;
+            } else {
+                run_cfg.max_bytes = readgen::ParseSizeString(max_bytes_str);
             }
             run_cfg.pattern = ParsePattern(pattern_str);
             run_cfg.filelist_path = filelist_path;
             run_cfg.files = readgen::LoadFileList(filelist_path);
             run_cfg.snapshot_interval_s = readgen::ParseDurationString(snapshot_str);
+            run_cfg.session_timeout_s = readgen::ParseDurationString(session_timeout_str);
             run_cfg.write_results = !no_results;
         } catch (const std::exception& e) {
             std::fprintf(stderr, "error: %s\n", e.what());
@@ -131,7 +138,8 @@ int main(int argc, char** argv) {
     if (probe_cmd->parsed()) return NotImplemented("probe", "coming later");
     if (report_cmd->parsed()) return NotImplemented("report", "coming later");
     if (version_cmd->parsed()) {
-        std::printf("xrd-readgen %s (%s, XrdCl %s)\n", READGEN_VERSION, BuildArch(), XrdVERSION);
+        std::printf("xrd-readgen %s (%s, XrdCl %s)\n", READGEN_VERSION, readgen::BuildArch(),
+                    XrdVERSION);
         return 0;
     }
     return 0;

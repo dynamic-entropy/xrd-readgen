@@ -6,6 +6,7 @@
 #include <string>
 
 using readgen::EncodePrometheusText;
+using readgen::ErrorClass;
 using readgen::MetricsRegistry;
 
 TEST(PromEncode, ContainsCoreSeriesAndHistogramBuckets) {
@@ -13,7 +14,7 @@ TEST(PromEncode, ContainsCoreSeriesAndHistogramBuckets) {
     reg.SetLabels("run-a", "host1", "default", "root://localhost/");
     reg.SetConfigGauges(10 * 1024 * 1024, 4);
     reg.ObserveSessionOk(1024, 2, 0.01, 0.02, 0.5, 1.0);
-    reg.ObserveSessionFail("timeout");
+    reg.ObserveSessionFail(ErrorClass::Timeout);
     reg.SetInflight(1, 2);
     reg.SampleProc();
 
@@ -22,7 +23,8 @@ TEST(PromEncode, ContainsCoreSeriesAndHistogramBuckets) {
 
     reg.ObserveSessionOk(1024, 1, 0.01, 0.02, 0.5, 1.0);
     auto snap2 = reg.Snapshot(2.25);
-    EXPECT_NEAR(snap2.achieved_rate_bytes, 1024.0 / 1.0, 1e-6);  // delta over 1s interval
+    EXPECT_NEAR(snap2.wall_s, 2.25, 1e-9);
+    EXPECT_NEAR(snap2.achieved_rate_bytes, 2048.0 / 2.25, 1e-6);
 
     const std::string text = EncodePrometheusText(snap2);
     EXPECT_NE(text.find("readgen_bytes_read_total{"), std::string::npos);

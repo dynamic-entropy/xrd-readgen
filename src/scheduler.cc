@@ -18,6 +18,7 @@ WorkItem Scheduler::Next() {
     item.session.offset = 0;
     item.session.random_offset = false;
     item.session.offset_seed = cfg_.seed ^ (++seq_ * 0x9e3779b97f4a7c15ULL);
+    item.session.wall_timeout_s = cfg_.session_timeout_s;
 
     bool use_vector = false;
     switch (cfg_.pattern) {
@@ -41,20 +42,7 @@ WorkItem Scheduler::Next() {
         item.session.vector_chunks = std::max<uint16_t>(1, cfg_.vector_chunks);
     }
 
-    // Token charge estimate before Stat knows the real size.
-    uint64_t charge = cfg_.chunk_size;
-    if (cfg_.max_bytes > 0) {
-        charge = cfg_.max_bytes;
-    } else if (cfg_.file_fraction > 0.0 && cfg_.file_fraction < 1.0) {
-        // Unknown file size: charge a few chunks as a stand-in; refund/adjust on done.
-        charge = static_cast<uint64_t>(cfg_.chunk_size * 4);
-    } else {
-        charge = static_cast<uint64_t>(cfg_.chunk_size) * 16;
-    }
-    if (use_vector) {
-        charge = std::max(charge, static_cast<uint64_t>(cfg_.chunk_size) * cfg_.vector_chunks);
-    }
-    item.charge_bytes = charge;
+    item.charge_bytes = EstimateSessionCharge(cfg_, use_vector);
     return item;
 }
 

@@ -40,7 +40,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Achieved vs target (bytes/s, binBps\u2192MiB/s). Achieved is readgen_achieved_rate_bytes \u2014 interval rate on the generator steady_clock \u2014 not Prometheus rate(counter) over Pushgateway scrapes.",
+      "description": "Achieved vs target (bytes/s, Bps\u2192MB/s SI). Achieved is cumulative bytes/wall on the generator steady_clock (same as run summary). Y-axis soft-min 0 so local near-target runs are not auto-zoomed.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -48,14 +48,15 @@
           },
           "custom": {
             "axisCenteredZero": false,
-            "axisLabel": "MiB/s",
+            "axisLabel": "MB/s",
+            "axisSoftMin": 0,
             "drawStyle": "line",
             "fillOpacity": 10,
             "lineWidth": 2,
             "showPoints": "never",
             "spanNulls": false
           },
-          "unit": "binBps"
+          "unit": "Bps"
         },
         "overrides": [
           {
@@ -135,7 +136,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Latest achieved rate gauge (generator steady_clock interval).",
+      "description": "Latest cumulative achieved rate (bytes / wall).",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -158,7 +159,7 @@
               }
             ]
           },
-          "unit": "binBps"
+          "unit": "Bps"
         }
       },
       "gridPos": {
@@ -213,7 +214,7 @@
               }
             ]
           },
-          "unit": "binBps"
+          "unit": "Bps"
         }
       },
       "gridPos": {
@@ -623,7 +624,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Bytes per CPU-second (Phase 2 arch-efficiency headline). Uses increase of bytes / increase of CPU over the rate window.",
+      "description": "Arch efficiency: bytes read per CPU-second (NOT a network rate). Unit is SI bytes (e.g. 303 MB = 303e6 B per CPU-s). Do not compare to the MB/s throughput panel.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -636,7 +637,7 @@
             "lineWidth": 2,
             "showPoints": "never"
           },
-          "unit": "binBps"
+          "unit": "decbytes"
         }
       },
       "gridPos": {
@@ -831,6 +832,6 @@
   "timezone": "browser",
   "title": "xrd-readgen / D1 Challenge Overview",
   "uid": "xrd-readgen-d1",
-  "version": 3,
+  "version": 6,
   "weekStart": ""
 }

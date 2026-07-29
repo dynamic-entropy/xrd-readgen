@@ -4,14 +4,19 @@
 #include <XrdCl/XrdClXRootDResponses.hh>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cinttypes>
+#include <condition_variable>
 #include <cstdio>
 #include <functional>
 #include <future>
 #include <limits>
+#include <memory>
+#include <mutex>
 #include <random>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -47,10 +52,80 @@ class FnHandler final : public XrdCl::ResponseHandler {
     Fn fn_;
 };
 
-class FileSession {
+class FileSession;
+
+// One shared deadline thread for all sessions (avoids one detached 50 ms poller
+// per in-flight session). Entries are weak; completed sessions drop out.
+// Must be ShutDown() before process exit — a detached forever-loop races static
+// destruction and SEGV's on IsCompleted (see exit-path cores).
+class SessionDeadlineWatchdog {
    public:
-    FileSession(const FileSessionOptions& opts, FileSessionDone on_done, bool heap)
-        : opts_(opts), on_done_(std::move(on_done)), heap_(heap) {
+    static SessionDeadlineWatchdog& Instance() {
+        // Heap-allocated so exit-time static dtors do not tear us down under the
+        // worker thread if ShutDown was skipped.
+        static SessionDeadlineWatchdog* w = new SessionDeadlineWatchdog();
+        return *w;
+    }
+
+    void Arm(const std::shared_ptr<FileSession>& session, double timeout_s) {
+        if (timeout_s <= 0.0 || !session) return;
+        const auto deadline =
+            Clock::now() +
+            std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(timeout_s));
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            if (stop_) return;
+            entries_.push_back(Entry{deadline, session});
+            EnsureThreadLocked();
+        }
+        cv_.notify_one();
+    }
+
+    void ShutDown() {
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            if (stop_) return;
+            stop_ = true;
+            entries_.clear();
+        }
+        cv_.notify_all();
+        if (thread_.joinable()) thread_.join();
+        std::lock_guard<std::mutex> lock(mu_);
+        started_ = false;
+        stop_ = false;  // allow a later run in the same process
+    }
+
+   private:
+    struct Entry {
+        Clock::time_point deadline;
+        std::weak_ptr<FileSession> session;
+    };
+
+    SessionDeadlineWatchdog() = default;
+    SessionDeadlineWatchdog(const SessionDeadlineWatchdog&) = delete;
+    SessionDeadlineWatchdog& operator=(const SessionDeadlineWatchdog&) = delete;
+
+    void EnsureThreadLocked() {
+        if (started_) return;
+        started_ = true;
+        stop_ = false;
+        thread_ = std::thread([this] { ThreadMain(); });
+    }
+
+    void ThreadMain();
+
+    std::mutex mu_;
+    std::condition_variable cv_;
+    std::vector<Entry> entries_;
+    bool started_ = false;
+    bool stop_ = false;
+    std::thread thread_;
+};
+
+class FileSession : public std::enable_shared_from_this<FileSession> {
+   public:
+    FileSession(const FileSessionOptions& opts, FileSessionDone on_done)
+        : opts_(opts), on_done_(std::move(on_done)) {
         result_.url = opts_.url;
         result_.vector = opts_.vector_chunks > 0;
 
@@ -60,50 +135,120 @@ class FileSession {
         close_handler_.Set([this](auto* st, auto* resp, auto* hosts) { OnClose(st, resp, hosts); });
     }
 
-    // Submit Open. Returns false if submission failed (Complete already called).
+    // Submit Open. Keeps a self-reference until the session is completed AND no
+    // XrdCl callback is outstanding (see ReleaseIfIdle).
     bool Start() {
+        std::unique_lock<std::mutex> lock(smu_);
+        self_keep_ = shared_from_this();
         buffer_.resize(OpBytes());
         t_start_ = Clock::now();
+        if (opts_.wall_timeout_s > 0.0) {
+            SessionDeadlineWatchdog::Instance().Arm(shared_from_this(), opts_.wall_timeout_s);
+        }
+        ++pending_cbs_;
         XrdCl::XRootDStatus st =
             file_.Open(opts_.url, XrdCl::OpenFlags::Read, XrdCl::Access::None, &open_handler_);
         if (!st.IsOK()) {
+            --pending_cbs_;
             result_.error = "open submission failed: " + st.ToString();
             result_.status_code = st.code;
             result_.err_code = st.errNo;
             Complete();
+            ReleaseIfIdle(lock);
             return false;
         }
         return true;
     }
 
-    FileSessionResult RunBlocking() {
-        std::promise<void> done;
-        auto fut = done.get_future();
-        on_done_ = [&](FileSessionResult r) {
-            result_ = std::move(r);
-            done.set_value();
-        };
-        if (Start()) fut.get();
-        return result_;
+    bool IsCompleted() const { return completed_.load(std::memory_order_acquire); }
+
+    // Invoked by the shared watchdog. Never sync-Close from the watchdog thread —
+    // that races XrdCl handlers and corrupts the heap under load. Ask for an
+    // async Close instead; OnClose completes the session. XrdCl rejects Close
+    // while another op is in flight (errInvalidOp), in which case SubmitClose
+    // rolls back and the in-flight op's handler retries the close on completion
+    // (IssueNext observes timed_out_).
+    void RequestWallTimeout() {
+        std::unique_lock<std::mutex> lock(smu_);
+        if (completed_.load(std::memory_order_acquire)) return;
+        if (close_requested_) return;  // normal Close in flight — not a timeout
+        timed_out_ = true;
+        SubmitClose();
+        ReleaseIfIdle(lock);
     }
 
    private:
+    // All private methods below require smu_ to be held. Handlers must call
+    // ReleaseIfIdle as their very last action: it may destroy *this.
     uint32_t OpBytes() const {
         return opts_.vector_chunks > 0 ? opts_.chunk_size * opts_.vector_chunks : opts_.chunk_size;
     }
 
+    void CapturePartialCounters() {
+        result_.bytes_read = bytes_read_;
+        result_.ops = ops_;
+        result_.data_server = data_server_;
+        result_.file_size = file_size_;
+        result_.open_hosts = hops_;
+    }
+
+    // Marks the session done and fires on_done. Does NOT drop self_keep_: the
+    // object must stay alive until every submitted XrdCl handler has run, or a
+    // late callback dereferences a destroyed handler (observed SEGV in
+    // HandleResponseWithHosts after wall timeouts).
     void Complete() {
+        bool expected = false;
+        if (!completed_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+            return;
+        }
         if (on_done_) {
             FileSessionDone cb = std::move(on_done_);
-            FileSessionResult r = result_;
-            // Self-delete when started via StartFileSession (heap). RunBlocking keeps stack.
-            const bool heap = heap_;
-            cb(std::move(r));
-            if (heap) delete this;
+            cb(result_);
         }
     }
 
+    // Drops the self-reference once the session is completed and no XrdCl
+    // callback is outstanding. May destroy *this on scope exit, so callers must
+    // not touch members afterwards. Always unlocks `lock`.
+    void ReleaseIfIdle(std::unique_lock<std::mutex>& lock) {
+        std::shared_ptr<FileSession> keep;
+        if (pending_cbs_ == 0 && completed_.load(std::memory_order_acquire)) {
+            keep = std::move(self_keep_);
+        }
+        lock.unlock();
+        // `keep` (possibly the last reference) is destroyed here, after unlock.
+    }
+
+    // Submits the async Close exactly once. If XrdCl rejects it because another
+    // op is in flight, rolls back so that op's handler retries via IssueNext.
+    // Completes the session on a definitive close failure.
+    void SubmitClose() {
+        if (close_requested_) return;
+        close_requested_ = true;
+        ++pending_cbs_;
+        XrdCl::XRootDStatus s = file_.Close(&close_handler_);
+        if (s.IsOK()) return;
+        --pending_cbs_;
+        if (pending_cbs_ > 0) {
+            close_requested_ = false;
+            return;
+        }
+        CapturePartialCounters();
+        if (timed_out_) {
+            result_.timed_out = true;
+            result_.error = "session wall timeout";
+            result_.status_code = s.code;
+            result_.err_code = 110;  // ETIMEDOUT
+        } else {
+            result_.error = "close submission failed: " + s.ToString();
+            result_.status_code = s.code;
+            result_.err_code = s.errNo;
+        }
+        Complete();
+    }
+
     void Fail(const char* stage, XrdCl::XRootDStatus* st) {
+        CapturePartialCounters();
         result_.error = std::string(stage) + " failed: " + (st ? st->ToString() : "(no status)");
         if (st) {
             result_.status_code = st->code;
@@ -126,8 +271,7 @@ class FileSession {
         result_.read_s = SecsBetween(t_open_, t_last_byte_);
         result_.close_ms = MsBetween(t_last_byte_, t_end_);
         result_.total_s = SecsBetween(t_start_, t_end_);
-        result_.throughput_mib_s =
-            result_.read_s > 0 ? bytes_read_ / result_.read_s / (1024.0 * 1024.0) : 0.0;
+        result_.throughput_mb_s = result_.read_s > 0 ? bytes_read_ / result_.read_s / 1e6 : 0.0;
         result_.op_lat_min_ms = ops_ > 0 ? lat_min_ms_ : 0.0;
         result_.op_lat_avg_ms = ops_ > 0 ? lat_sum_ms_ / ops_ : 0.0;
         result_.op_lat_max_ms = lat_max_ms_;
@@ -136,32 +280,62 @@ class FileSession {
     }
 
     void OnOpen(XrdCl::XRootDStatus* st, XrdCl::AnyObject* resp, XrdCl::HostList* hosts) {
+        std::unique_lock<std::mutex> lock(smu_);
+        --pending_cbs_;
+        if (completed_.load(std::memory_order_acquire)) {
+            delete hosts;
+            delete resp;
+            delete st;
+            ReleaseIfIdle(lock);
+            return;
+        }
         t_open_ = Clock::now();
         if (hosts) {
             hops_ = hosts->size();
             delete hosts;
         }
         delete resp;
-        if (!st->IsOK()) return Fail("open", st);
+        if (!st->IsOK()) {
+            Fail("open", st);
+            ReleaseIfIdle(lock);
+            return;
+        }
         delete st;
 
         file_.GetProperty("DataServer", data_server_);
-        // Stat(false) after Open can complete synchronously from cached kXR_retstat
-        // while still inside OpenHandler — nesting Read deadlocks JobManager.
+        if (timed_out_) {
+            SubmitClose();
+            ReleaseIfIdle(lock);
+            return;
+        }
+        ++pending_cbs_;
         XrdCl::XRootDStatus s = file_.Stat(/*force=*/true, &stat_handler_);
         if (!s.IsOK()) {
+            --pending_cbs_;
             result_.error = "stat submission failed: " + s.ToString();
             result_.status_code = s.code;
             result_.err_code = s.errNo;
             Complete();
         }
+        ReleaseIfIdle(lock);
     }
 
     void OnStat(XrdCl::XRootDStatus* st, XrdCl::AnyObject* resp, XrdCl::HostList* hosts) {
+        std::unique_lock<std::mutex> lock(smu_);
+        --pending_cbs_;
+        if (completed_.load(std::memory_order_acquire)) {
+            delete hosts;
+            delete resp;
+            delete st;
+            ReleaseIfIdle(lock);
+            return;
+        }
         delete hosts;
         if (!st->IsOK()) {
             delete resp;
-            return Fail("stat", st);
+            Fail("stat", st);
+            ReleaseIfIdle(lock);
+            return;
         }
         delete st;
 
@@ -193,29 +367,28 @@ class FileSession {
             result_.data_server = data_server_;
             result_.open_hosts = hops_;
             Complete();
+            ReleaseIfIdle(lock);
             return;
         }
 
         remaining_ = std::min(file_size_ - start, budget);
         next_offset_ = start;
         IssueNext();
+        ReleaseIfIdle(lock);
     }
 
     void IssueNext() {
+        if (completed_.load(std::memory_order_acquire)) return;
+        if (timed_out_) remaining_ = 0;
         if (remaining_ == 0) {
             t_last_byte_ = Clock::now();
-            XrdCl::XRootDStatus s = file_.Close(&close_handler_);
-            if (!s.IsOK()) {
-                result_.error = "close submission failed: " + s.ToString();
-                result_.status_code = s.code;
-                result_.err_code = s.errNo;
-                Complete();
-            }
+            SubmitClose();
             return;
         }
 
         t_issue_ = Clock::now();
         XrdCl::XRootDStatus s;
+        ++pending_cbs_;
         if (opts_.vector_chunks > 0) {
             XrdCl::ChunkList chunks;
             char* buf = buffer_.data();
@@ -235,6 +408,8 @@ class FileSession {
             s = file_.Read(next_offset_, static_cast<uint32_t>(requested_), buffer_.data(), &read_handler_);
         }
         if (!s.IsOK()) {
+            --pending_cbs_;
+            CapturePartialCounters();
             result_.error = "read submission failed: " + s.ToString();
             result_.status_code = s.code;
             result_.err_code = s.errNo;
@@ -243,11 +418,22 @@ class FileSession {
     }
 
     void OnRead(XrdCl::XRootDStatus* st, XrdCl::AnyObject* resp, XrdCl::HostList* hosts) {
+        std::unique_lock<std::mutex> lock(smu_);
+        --pending_cbs_;
+        if (completed_.load(std::memory_order_acquire)) {
+            delete hosts;
+            delete resp;
+            delete st;
+            ReleaseIfIdle(lock);
+            return;
+        }
         const Clock::time_point now = Clock::now();
         delete hosts;
         if (!st->IsOK()) {
             delete resp;
-            return Fail(opts_.vector_chunks > 0 ? "vector_read" : "read", st);
+            Fail(opts_.vector_chunks > 0 ? "vector_read" : "read", st);
+            ReleaseIfIdle(lock);
+            return;
         }
         delete st;
 
@@ -275,23 +461,49 @@ class FileSession {
         next_offset_ += got;
         remaining_ = got < requested_ ? 0 : remaining_ - got;
         IssueNext();
+        ReleaseIfIdle(lock);
     }
 
     void OnClose(XrdCl::XRootDStatus* st, XrdCl::AnyObject* resp, XrdCl::HostList* hosts) {
+        std::unique_lock<std::mutex> lock(smu_);
+        --pending_cbs_;
+        if (completed_.load(std::memory_order_acquire)) {
+            delete hosts;
+            delete resp;
+            delete st;
+            ReleaseIfIdle(lock);
+            return;
+        }
         t_end_ = Clock::now();
         delete hosts;
         delete resp;
-        if (!st->IsOK()) return Fail("close", st);
+        if (timed_out_) {
+            CapturePartialCounters();
+            result_.timed_out = true;
+            result_.error = "session wall timeout";
+            result_.status_code = st ? st->code : 0;
+            result_.err_code = 110;
+            delete st;
+            Complete();
+            ReleaseIfIdle(lock);
+            return;
+        }
+        if (!st->IsOK()) {
+            Fail("close", st);
+            ReleaseIfIdle(lock);
+            return;
+        }
         delete st;
         FinishOk();
+        ReleaseIfIdle(lock);
     }
 
     const FileSessionOptions opts_;
     FileSessionDone on_done_;
-    const bool heap_;
     FileSessionResult result_;
     XrdCl::File file_;
     std::vector<char> buffer_;
+    std::shared_ptr<FileSession> self_keep_;
 
     FnHandler open_handler_, stat_handler_, read_handler_, close_handler_;
 
@@ -309,18 +521,76 @@ class FileSession {
     double lat_max_ms_ = 0.0;
 
     Clock::time_point t_start_, t_open_, t_first_byte_, t_last_byte_, t_end_, t_issue_;
+
+    // Serializes all session state transitions between XrdCl handler threads
+    // and the deadline watchdog. XrdCl invokes response handlers without
+    // holding file-state locks, so submitting ops under smu_ is safe.
+    std::mutex smu_;
+    // Outstanding XrdCl callbacks still expected (guarded by smu_). The session
+    // may only be released once this drops to zero.
+    int pending_cbs_ = 0;
+    bool timed_out_ = false;        // guarded by smu_
+    bool close_requested_ = false;  // guarded by smu_
+    std::atomic<bool> completed_{false};  // atomic: watchdog reads it lock-free
 };
+
+void SessionDeadlineWatchdog::ThreadMain() {
+    constexpr auto kMaxSleep = std::chrono::seconds(1);
+    std::unique_lock<std::mutex> lock(mu_);
+    while (!stop_) {
+        const auto now = Clock::now();
+        Clock::time_point next_deadline = now + kMaxSleep;
+        std::vector<std::shared_ptr<FileSession>> expired;
+
+        // Prune dead entries and collect sessions past their deadline.
+        size_t out = 0;
+        for (size_t i = 0; i < entries_.size(); ++i) {
+            auto self = entries_[i].session.lock();
+            if (!self || self->IsCompleted()) {
+                continue;
+            }
+            if (entries_[i].deadline <= now) {
+                expired.push_back(std::move(self));
+                continue;
+            }
+            next_deadline = std::min(next_deadline, entries_[i].deadline);
+            if (out != i) entries_[out] = std::move(entries_[i]);
+            ++out;
+        }
+        entries_.resize(out);
+
+        lock.unlock();
+        for (auto& s : expired) {
+            s->RequestWallTimeout();
+        }
+        lock.lock();
+        if (stop_) break;
+
+        auto wait_for = next_deadline - Clock::now();
+        if (wait_for < std::chrono::milliseconds(1)) wait_for = std::chrono::milliseconds(1);
+        if (wait_for > kMaxSleep) wait_for = kMaxSleep;
+        cv_.wait_for(lock, wait_for, [this] { return stop_; });
+    }
+}
 
 }  // namespace
 
 FileSessionResult RunFileSession(const FileSessionOptions& opts) {
-    FileSession session(opts, nullptr, /*heap=*/false);
-    return session.RunBlocking();
+    std::promise<FileSessionResult> done;
+    auto fut = done.get_future();
+    auto session = std::make_shared<FileSession>(opts, [&](FileSessionResult r) {
+        done.set_value(std::move(r));
+    });
+    // On sync submission failure Start already ran Complete, so fut is ready.
+    (void)session->Start();
+    return fut.get();
 }
 
 void StartFileSession(const FileSessionOptions& opts, FileSessionDone on_done) {
-    auto* session = new FileSession(opts, std::move(on_done), /*heap=*/true);
-    (void)session->Start();  // On sync failure Complete() already deleted the session.
+    auto session = std::make_shared<FileSession>(opts, std::move(on_done));
+    (void)session->Start();
 }
+
+void ShutdownSessionWatchdog() { SessionDeadlineWatchdog::Instance().ShutDown(); }
 
 }  // namespace readgen

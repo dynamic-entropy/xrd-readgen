@@ -1,22 +1,13 @@
 #include "readgen/run_config.hh"
-#include "readgen/token_bucket.hh"
+
+#include <algorithm>
 
 #include <gtest/gtest.h>
 
-#include <chrono>
-#include <stdexcept>
-
 using readgen::ComputeAutoMaxBytes;
+using readgen::ComputeBucketBurst;
 using readgen::ResolveRunConfig;
 using readgen::RunConfig;
-using readgen::TokenBucket;
-using Clock = std::chrono::steady_clock;
-
-TEST(TokenBucket, ChargeLargerThanBurstFailsFast) {
-    TokenBucket b(50ull << 20, 50ull << 20);  // 50 MiB/s, 50 MiB burst
-    const auto deadline = Clock::now() + std::chrono::milliseconds(50);
-    EXPECT_FALSE(b.AcquireUntil(100ull << 20, deadline));  // 100 MiB > burst
-}
 
 TEST(AutoMaxBytes, ScalesWithWorkers) {
     RunConfig cfg;
@@ -27,8 +18,18 @@ TEST(AutoMaxBytes, ScalesWithWorkers) {
     cfg.workers = 32;
     const uint64_t b = ComputeAutoMaxBytes(cfg);
     EXPECT_GT(a, b);
-    EXPECT_GE(a, 4ull << 20);
-    EXPECT_LE(a, cfg.target_rate_bps * 2);
+    EXPECT_GE(a, static_cast<uint64_t>(cfg.chunk_size) * readgen::kAutoMaxFloorChunks);
+    const uint64_t aggregate_cap = static_cast<uint64_t>(
+        static_cast<double>(cfg.target_rate_bps) * readgen::kRateHeadroomSec);
+    EXPECT_LE(a, std::min(aggregate_cap, readgen::kAutoMaxHardCapBytes));
+}
+
+TEST(AutoMaxBytes, RespectsHardCap) {
+    RunConfig cfg;
+    cfg.target_rate_bps = 500ull * 1000 * 1000;  // 500 MB/s SI
+    cfg.chunk_size = 1 << 20;
+    cfg.workers = 1;  // amortize would be huge without the hard cap
+    EXPECT_LE(ComputeAutoMaxBytes(cfg), readgen::kAutoMaxHardCapBytes);
 }
 
 TEST(AutoMaxBytes, ResolveSetsMaxBytes) {
@@ -39,11 +40,26 @@ TEST(AutoMaxBytes, ResolveSetsMaxBytes) {
     cfg.max_bytes_auto = true;
     ResolveRunConfig(cfg);
     EXPECT_GT(cfg.max_bytes, 0u);
+    EXPECT_EQ(cfg.max_bytes, ComputeAutoMaxBytes(cfg));
 }
 
-TEST(AutoMaxBytes, RequiresRate) {
+TEST(AutoMaxBytes, UncappedClearsAuto) {
     RunConfig cfg;
     cfg.max_bytes_auto = true;
     cfg.target_rate_bps = 0;
-    EXPECT_THROW(ResolveRunConfig(cfg), std::runtime_error);
+    ResolveRunConfig(cfg);
+    EXPECT_FALSE(cfg.max_bytes_auto);
+    EXPECT_EQ(cfg.max_bytes, 0u);
+}
+
+TEST(BucketBurst, CoversWorkerPipeline) {
+    RunConfig cfg;
+    cfg.target_rate_bps = 10ull << 20;
+    cfg.workers = 4;
+    cfg.max_bytes = 20ull << 20;
+    cfg.chunk_size = 1 << 20;
+    const uint64_t burst = ComputeBucketBurst(cfg);
+    EXPECT_GE(burst, cfg.max_bytes * cfg.workers);
+    EXPECT_GE(burst, static_cast<uint64_t>(static_cast<double>(cfg.target_rate_bps) *
+                                           readgen::kRateHeadroomSec));
 }

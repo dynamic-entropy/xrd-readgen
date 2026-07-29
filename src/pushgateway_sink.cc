@@ -89,12 +89,7 @@ bool PushgatewaySink::Push(const MetricsSnapshot& snap) {
     last_instance_ = snap.job_id.empty() ? "local" : snap.job_id;
     const std::string url = GroupUrl(last_instance_);
     const std::string body = EncodePrometheusText(snap);
-    long code = 0;
-    const bool ok = HttpRequest("PUT", url, body, &code);
-    if (ok) {
-        // Quiet success on interval pushes; first success noted by caller if desired.
-    }
-    return ok;
+    return HttpRequest("PUT", url, body, nullptr);
 }
 
 void PushgatewaySink::Finish(const std::string& instance) {
@@ -102,8 +97,7 @@ void PushgatewaySink::Finish(const std::string& instance) {
     finished_ = true;
     const std::string inst = !instance.empty() ? instance : last_instance_;
     if (inst.empty()) return;
-    long code = 0;
-    (void)HttpRequest("DELETE", GroupUrl(inst), {}, &code);
+    (void)HttpRequest("DELETE", GroupUrl(inst), {}, nullptr);
 }
 
 }  // namespace readgen

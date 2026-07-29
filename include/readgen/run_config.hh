@@ -16,26 +16,33 @@ struct RunConfig {
     std::vector<std::string> files;  // paths relative to endpoint (or absolute LFNs)
     std::string filelist_path;       // source path (for dry-run display)
     uint64_t target_rate_bps = 0;    // 0 = uncapped
-    uint32_t workers = 4;            // max in-flight FileSessions
+    std::string target_rate_input;   // original --rate string (for operator echo)
+    uint32_t workers = 16;           // max in-flight FileSessions
     PatternType pattern = PatternType::Sequential;
     uint32_t chunk_size = 1 << 20;   // bytes per read chunk
     uint16_t vector_chunks = 8;      // chunks per VectorRead when vector/mixed
     double vector_fraction = 0.4;    // mixed: fraction of sessions that are vector
     double file_fraction = 1.0;      // fraction of each file to read
     uint64_t max_bytes = 0;          // 0 = use file_fraction only (unless max_bytes_auto)
-    bool max_bytes_auto = false;     // compute max_bytes from rate / workers
-    bool reopen = true;
+    bool max_bytes_auto = false;     // compute max_bytes once at start from rate / workers
     uint64_t seed = 1;
     bool dry_run = false;
 
-    // Metrics / FileSink (Chunk 3)
+    // Bound a stuck XrdCl session / reconnect (0 = disabled).
+    double session_timeout_s = 60.0;
+    // XrdCl DefaultEnv overrides applied at run start (seconds / counts).
+    int connection_window_s = 15;  // default XrdCl is 120 — too long for a worker slot
+    int connection_retry = 2;
+    int request_timeout_s = 60;
+
+    // Metrics / FileSink
     std::string results_dir = "results";
     double snapshot_interval_s = 15.0;
     std::string job_id;       // empty → hostname or "local"
     bool write_results = true;  // --no-results disables FileSink
     std::string target = "default";  // label; single-target CLI
 
-    // Pushgateway (Chunk 4) — empty disables push. Observability stack is external.
+    // Pushgateway — empty disables push. Observability stack is external.
     std::string pushgateway_url;
     std::string pushgateway_job = "xrd-readgen";
     bool pushgateway_keep = false;  // if true, skip DELETE on exit (debug / short smoke)
@@ -43,11 +50,51 @@ struct RunConfig {
 
 const char* PatternTypeName(PatternType t);
 
-// Per-session byte budget sized to sustain target_rate with `workers`
-// concurrent sessions (amortizes open/TTFB). Requires target_rate_bps > 0.
+// ---------------------------------------------------------------------------
+// Rate / session sizing policy (compile-time; not CLI-tunable).
+//
+// --max-bytes auto  (ComputeAutoMaxBytes):
+//   charge ≈ (target_rate / workers) × kAutoMaxAmortizeSec
+//   floor  = kAutoMaxFloorChunks × chunk_size
+//   ceil   = min(target_rate × kRateHeadroomSec, kAutoMaxHardCapBytes)
+//
+// Pre-Stat token charge  (EstimateSessionCharge):
+//   max_bytes if set; else kEstimateChargePartialChunks × chunk when
+//   0 < file_fraction < 1; else kEstimateChargeFullChunks × chunk.
+//   Vector sessions charge at least one VectorRead op.
+//
+// Token-bucket burst  (ComputeBucketBurst):
+//   max(workers × charge, target_rate × kRateHeadroomSec, charge)
+//   Intentional: admits a full worker pipeline immediately, so achieved
+//   rate can briefly overshoot --rate at start or after stalls.
+//
+// End-of-run drain wait  (RunEngine):
+//   min(kDrainWaitCapSec, session_timeout_s + kDrainTimeoutGraceSec)
+//   when --session-timeout > 0; else kDrainWaitCapSec.
+// ---------------------------------------------------------------------------
+inline constexpr double kAutoMaxAmortizeSec = 8.0;
+inline constexpr uint32_t kAutoMaxFloorChunks = 4;
+inline constexpr uint64_t kAutoMaxHardCapBytes = 32ull * 1000 * 1000;  // 32 MB (SI)
+inline constexpr uint32_t kEstimateChargePartialChunks = 4;
+inline constexpr uint32_t kEstimateChargeFullChunks = 16;
+// Seconds of target_rate used as (a) auto max_bytes aggregate cap and
+// (b) minimum token-bucket headroom beyond one pipeline of charges.
+inline constexpr double kRateHeadroomSec = 2.0;
+inline constexpr double kDrainWaitCapSec = 120.0;
+inline constexpr double kDrainTimeoutGraceSec = 15.0;
+
+// Per-session byte budget for --max-bytes auto. Requires target_rate_bps > 0.
 uint64_t ComputeAutoMaxBytes(const RunConfig& cfg);
 
-// If max_bytes_auto, fill max_bytes. Ensures token-bucket burst can cover a charge.
+// Estimated per-session token charge before Stat knows the real file size.
+// Shared by Scheduler (Acquire) and ComputeBucketBurst.
+uint64_t EstimateSessionCharge(const RunConfig& cfg, bool use_vector);
+
+// Token-bucket burst capacity from the rate policy above.
+uint64_t ComputeBucketBurst(const RunConfig& cfg);
+
+// If max_bytes_auto, fill max_bytes from rate/workers. Uncapped rate clears
+// max_bytes_auto.
 void ResolveRunConfig(RunConfig& cfg);
 
 // Join endpoint + path into a root:// URL.

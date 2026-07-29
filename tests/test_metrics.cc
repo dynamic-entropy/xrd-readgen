@@ -6,6 +6,7 @@
 #include <thread>
 #include <vector>
 
+using readgen::ErrorClass;
 using readgen::Histogram;
 using readgen::HistogramPercentile;
 using readgen::MetricsRegistry;
@@ -50,7 +51,7 @@ TEST(MetricsRegistry, SessionOkAndFail) {
     r.SetLabels("run1", "job1", "default", "root://localhost/");
     r.SetConfigGauges(1024 * 1024, 8);
     r.ObserveSessionOk(1000, 2, 0.01, 0.02, 0.5, 1.0);
-    r.ObserveSessionFail("connection");
+    r.ObserveSessionFail(ErrorClass::Connection);
     r.SetInflight(3, 5);
     r.SampleProc();
 

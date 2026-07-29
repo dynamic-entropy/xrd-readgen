@@ -64,7 +64,7 @@ void AppendHistogram(std::ostringstream& o, const char* name, const char* help, 
     uint64_t cum = 0;
     const size_t n_finite = h.bounds.size();
     for (size_t i = 0; i < h.counts.size(); ++i) {
-        cum += (i < h.counts.size()) ? h.counts[i] : 0;
+        cum += h.counts[i];
         char le[64];
         if (i < n_finite) {
             std::snprintf(le, sizeof(le), "%.9g", h.bounds[i]);
@@ -106,7 +106,7 @@ std::string EncodePrometheusText(const MetricsSnapshot& snap) {
     AppendGauge(o, "readgen_target_rate_bytes", "Configured target rate in bytes/sec", L,
                 snap.target_rate_bytes);
     AppendGauge(o, "readgen_achieved_rate_bytes",
-                "Achieved read rate over last snapshot interval (steady_clock bytes/sec)", L,
+                "Cumulative achieved read rate (bytes_read / steady_clock wall sec)", L,
                 snap.achieved_rate_bytes);
     AppendHistogram(o, "readgen_open_seconds", "File open latency including redirects", L,
                     snap.open_seconds);

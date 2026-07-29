@@ -17,13 +17,17 @@ struct FileSessionOptions {
     double file_fraction = 1.0;     // fraction of file size to read (after Stat)
     bool random_offset = false;     // pick start offset after Stat (seeded)
     uint64_t offset_seed = 0;       // RNG seed for random_offset
+    // Soft wall clock for the whole session (0 = disabled). A shared deadline
+    // watchdog aborts via Close so a dead reconnect cannot pin a worker for minutes.
+    double wall_timeout_s = 0.0;
 };
 
 // Client-side timings and counters from one completed (or failed) session.
 // Timestamps are taken in XrdCl response handlers (steady_clock).
 struct FileSessionResult {
     bool ok = false;
-    std::string error;  // non-empty when !ok
+    bool timed_out = false;  // session wall timeout fired (watchdog aborted via Close)
+    std::string error;       // non-empty when !ok
     int status_code = 0;
     int err_code = 0;
 
@@ -41,7 +45,7 @@ struct FileSessionResult {
     uint64_t bytes_read = 0;
     uint64_t ops = 0;
     bool vector = false;
-    double throughput_mib_s = 0.0;
+    double throughput_mb_s = 0.0;  // SI MB/s (bytes/s / 1e6)
 
     double op_lat_min_ms = 0.0;
     double op_lat_avg_ms = 0.0;
@@ -54,9 +58,14 @@ using FileSessionDone = std::function<void(FileSessionResult)>;
 FileSessionResult RunFileSession(const FileSessionOptions& opts);
 
 // Fire-and-forget: submit Open and return immediately. Invokes on_done from an
-// XrdCl worker thread when the session finishes. Session is heap-allocated and
-// self-deleting. on_done must be safe to call from that thread.
+// XrdCl worker thread when the session finishes. The session holds a shared_ptr
+// self-reference until it completes and all XrdCl callbacks have run, then
+// releases itself. on_done must be safe to call from that thread.
 void StartFileSession(const FileSessionOptions& opts, FileSessionDone on_done);
+
+// Stop the shared session-deadline thread. Call after draining sessions (e.g.
+// end of `run`) so process exit does not race the watchdog.
+void ShutdownSessionWatchdog();
 
 }  // namespace readgen
 

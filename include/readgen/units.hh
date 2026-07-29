@@ -10,14 +10,15 @@ namespace readgen {
 // Duration: "30", "30s", "5m", "1h" → seconds
 double ParseDurationString(const std::string& s);
 
-// Rate: "100MiBps", "1Gbps", "500MB/s" → bytes/sec
+// Rate: "100MBps", "100MiBps", "1Gbps", "500MB/s" → bytes/sec
+//   MBps / MB/s = SI megabytes/sec; Mbps = megabits/sec; MiBps = mebibytes/sec
 uint64_t ParseRateString(const std::string& s);
 
-// Size: "1MiB", "512KiB", "1024" → bytes
+// Size: "1MB", "1MiB", "512KiB", "1024" → bytes (MB=SI, MiB=binary)
 uint64_t ParseSizeString(const std::string& s);
 
-std::string FormatBytes(uint64_t n);
-std::string FormatRate(uint64_t bytes_per_sec);
+std::string FormatBytes(uint64_t n);   // SI: kB / MB / GB
+std::string FormatRate(uint64_t bytes_per_sec);  // e.g. "28.28 MB/s"
 std::string FormatDuration(double seconds);
 
 }  // namespace readgen

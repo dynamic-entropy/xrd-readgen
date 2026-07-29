@@ -40,23 +40,57 @@ std::string Lower(std::string u) {
     return u;
 }
 
-uint64_t ScaleBinary(double value, const std::string& unit_in) {
+// SI (KB/MB/GB = 1000^n) vs IEC binary (KiB/MiB/GiB = 1024^n).
+// Bare k/m/g default to SI (decimal).
+uint64_t ScaleBytes(double value, const std::string& unit_in) {
     const std::string u = Lower(unit_in);
     double mul = 1.0;
     if (u.empty() || u == "b" || u == "byte" || u == "bytes")
         mul = 1.0;
-    else if (u == "k" || u == "kb" || u == "kib")
+    else if (u == "kib")
         mul = 1024.0;
-    else if (u == "m" || u == "mb" || u == "mib")
+    else if (u == "mib")
         mul = 1024.0 * 1024.0;
-    else if (u == "g" || u == "gb" || u == "gib")
+    else if (u == "gib")
         mul = 1024.0 * 1024.0 * 1024.0;
-    else if (u == "t" || u == "tb" || u == "tib")
+    else if (u == "tib")
         mul = 1024.0 * 1024.0 * 1024.0 * 1024.0;
+    else if (u == "k" || u == "kb")
+        mul = 1e3;
+    else if (u == "m" || u == "mb")
+        mul = 1e6;
+    else if (u == "g" || u == "gb")
+        mul = 1e9;
+    else if (u == "t" || u == "tb")
+        mul = 1e12;
     else
         throw std::runtime_error("unknown size unit '" + unit_in + "'");
     if (value < 0) throw std::runtime_error("size must be non-negative");
     return static_cast<uint64_t>(value * mul + 0.5);
+}
+
+// Mbps (bits) vs MBps (bytes): case-sensitive before folding.
+//   Mbps / mbps / Gbps  → bit rate
+//   MBps / MB/s / MiBps → byte rate
+bool LooksLikeBitRate(const std::string& unit) {
+    if (unit.empty()) return false;
+    // Explicit *bps with lowercase 'b' immediately before "ps" → bits
+    // e.g. Mbps, mbps, Gbps, kbps. Not MBps (capital B) or MiBps.
+    if (unit.size() >= 3) {
+        const std::string last3 = unit.substr(unit.size() - 3);
+        if (last3 == "bps" || last3 == "Bps") {
+            // "...bps": char before bps
+            if (unit.size() == 3) return true;  // "bps"
+            const char pref = unit[unit.size() - 4];
+            if (pref == 'i' || pref == 'I') return false;       // MiBps
+            if (pref == 'B') return false;                      // MBps / KBps / GBps
+            if (pref == 'b' || std::isalpha(static_cast<unsigned char>(pref))) {
+                // mbps, Mbps, Gbps, kbps — lowercase b in "bps"
+                return last3[0] == 'b';
+            }
+        }
+    }
+    return false;
 }
 
 }  // namespace
@@ -74,9 +108,8 @@ double ParseDurationString(const std::string& s) {
 }
 
 uint64_t ParseRateString(const std::string& s) {
-    // Accept: 100MiBps, 1Gbps, 500MB/s, 1e6 (raw bytes/sec)
+    // Accept: 100MBps, 100MiBps, 1Gbps, 500MB/s, 35Mbps, 1e6 (raw bytes/sec)
     std::string t = s;
-    // Normalize "/s" → trailing handled below
     if (t.size() >= 2 && (t.compare(t.size() - 2, 2, "/s") == 0 || t.compare(t.size() - 2, 2, "/S") == 0)) {
         t.resize(t.size() - 2);
     }
@@ -85,55 +118,52 @@ uint64_t ParseRateString(const std::string& s) {
     if (!ParseNumberSuffix(t, value, unit)) throw std::runtime_error("cannot parse rate '" + s + "'");
     if (value < 0) throw std::runtime_error("rate must be non-negative");
 
-    std::string u = Lower(unit);
-    // Strip trailing "ps" or "bps"
-    if (u.size() >= 2 && u.compare(u.size() - 2, 2, "ps") == 0) u.resize(u.size() - 2);
-    if (u.size() >= 3 && u.compare(u.size() - 3, 3, "bps") == 0) u.resize(u.size() - 3);
+    if (unit.empty()) return static_cast<uint64_t>(value + 0.5);
 
-    // Bit rates: gbps-style after stripping ps → "gb", but "gib" stays binary bytes.
-    // Treat plain g/m/k without 'i' and without 'b' as bits if original had bps.
-    const bool looked_like_bits =
-        Lower(unit).find("bps") != std::string::npos ||
-        (Lower(unit).size() >= 2 && Lower(unit).compare(Lower(unit).size() - 2, 2, "ps") == 0 &&
-         Lower(unit).find('i') == std::string::npos);
-
-    if (u.empty()) return static_cast<uint64_t>(value + 0.5);
-
-    if (looked_like_bits && (u == "g" || u == "gb" || u == "m" || u == "mb" || u == "k" || u == "kb")) {
+    if (LooksLikeBitRate(unit)) {
+        std::string u = Lower(unit);
+        if (u.size() >= 3 && u.compare(u.size() - 3, 3, "bps") == 0) u.resize(u.size() - 3);
         double bits = value;
-        if (u[0] == 'k') bits *= 1e3;
-        else if (u[0] == 'm') bits *= 1e6;
-        else if (u[0] == 'g') bits *= 1e9;
+        if (u.empty() || u == "b") {
+            // 8bps
+        } else if (u == "k" || u == "kb")
+            bits *= 1e3;
+        else if (u == "m" || u == "mb")
+            bits *= 1e6;
+        else if (u == "g" || u == "gb")
+            bits *= 1e9;
+        else if (u == "t" || u == "tb")
+            bits *= 1e12;
+        else
+            throw std::runtime_error("unknown bit-rate unit '" + unit + "'");
         return static_cast<uint64_t>(bits / 8.0 + 0.5);
     }
 
-    // Byte rates: MiB, MB, GiB, …
-    if (!u.empty() && u.back() == 'b') {
-        // already has b
-    } else if (u == "k" || u == "m" || u == "g" || u == "t") {
-        u.push_back('b');
-    }
-    return ScaleBinary(value, u);
+    // Byte rates: strip trailing "ps" from MBps / MiBps; ScaleBytes accepts
+    // bare k/m/g/t as SI.
+    std::string u = Lower(unit);
+    if (u.size() >= 2 && u.compare(u.size() - 2, 2, "ps") == 0) u.resize(u.size() - 2);
+    return ScaleBytes(value, u);
 }
 
 uint64_t ParseSizeString(const std::string& s) {
     double value = 0;
     std::string unit;
     if (!ParseNumberSuffix(s, value, unit)) throw std::runtime_error("cannot parse size '" + s + "'");
-    return ScaleBinary(value, unit);
+    return ScaleBytes(value, unit);
 }
 
 std::string FormatBytes(uint64_t n) {
     char buf[64];
-    const double kib = 1024.0;
-    const double mib = kib * 1024.0;
-    const double gib = mib * 1024.0;
-    if (n >= static_cast<uint64_t>(gib))
-        std::snprintf(buf, sizeof(buf), "%.2f GiB", n / gib);
-    else if (n >= static_cast<uint64_t>(mib))
-        std::snprintf(buf, sizeof(buf), "%.2f MiB", n / mib);
-    else if (n >= static_cast<uint64_t>(kib))
-        std::snprintf(buf, sizeof(buf), "%.2f KiB", n / kib);
+    const double kb = 1e3;
+    const double mb = 1e6;
+    const double gb = 1e9;
+    if (n >= static_cast<uint64_t>(gb))
+        std::snprintf(buf, sizeof(buf), "%.2f GB", n / gb);
+    else if (n >= static_cast<uint64_t>(mb))
+        std::snprintf(buf, sizeof(buf), "%.2f MB", n / mb);
+    else if (n >= static_cast<uint64_t>(kb))
+        std::snprintf(buf, sizeof(buf), "%.2f kB", n / kb);
     else
         std::snprintf(buf, sizeof(buf), "%" PRIu64 " B", n);
     return buf;

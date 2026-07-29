@@ -36,3 +36,9 @@ TEST(TokenBucket, AcquireUntilDeadline) {
     const auto deadline = Clock::now() + std::chrono::milliseconds(5);
     EXPECT_FALSE(b.AcquireUntil(1000000, deadline));
 }
+
+TEST(TokenBucket, ChargeLargerThanBurstFailsFast) {
+    TokenBucket b(50ull << 20, 50ull << 20);  // 50 MiB/s, 50 MiB burst
+    const auto deadline = Clock::now() + std::chrono::milliseconds(50);
+    EXPECT_FALSE(b.AcquireUntil(100ull << 20, deadline));  // 100 MiB > burst
+}

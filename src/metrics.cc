@@ -60,12 +60,6 @@ HistogramSnapshot Histogram::Snapshot() const {
     return s;
 }
 
-void Histogram::Reset() {
-    for (auto& b : buckets_) b.store(0, std::memory_order_relaxed);
-    count_.store(0, std::memory_order_relaxed);
-    sum_us_.store(0, std::memory_order_relaxed);
-}
-
 ProcessSample SampleProcess() {
     ProcessSample out;
     const long ticks = sysconf(_SC_CLK_TCK);
@@ -132,39 +126,20 @@ void MetricsRegistry::ObserveSessionOk(uint64_t bytes, uint64_t ops, double open
     redirects_per_open_.Observe(redirects);
 }
 
-void MetricsRegistry::ObserveSessionFail(const std::string& error_class) {
+void MetricsRegistry::ObserveSessionFail(ErrorClass error_class) {
     sessions_fail_.fetch_add(1, std::memory_order_relaxed);
-    if (error_class == "auth")
-        err_auth_.fetch_add(1, std::memory_order_relaxed);
-    else if (error_class == "timeout")
-        err_timeout_.fetch_add(1, std::memory_order_relaxed);
-    else if (error_class == "connection")
-        err_connection_.fetch_add(1, std::memory_order_relaxed);
-    else if (error_class == "server_error")
-        err_server_error_.fetch_add(1, std::memory_order_relaxed);
-    else if (error_class == "not_found")
-        err_not_found_.fetch_add(1, std::memory_order_relaxed);
-    else if (error_class == "client_error")
-        err_client_error_.fetch_add(1, std::memory_order_relaxed);
-    else if (error_class == "redirect_loop")
-        err_redirect_loop_.fetch_add(1, std::memory_order_relaxed);
-    else
-        err_unknown_.fetch_add(1, std::memory_order_relaxed);
+    errors_by_class_[static_cast<size_t>(error_class)].fetch_add(1, std::memory_order_relaxed);
 }
 
 void MetricsRegistry::ObserveSoftFault(const std::string& kind) {
-    if (kind == "connection")
-        soft_connection_.fetch_add(1, std::memory_order_relaxed);
-    else if (kind == "timeout")
-        soft_timeout_.fetch_add(1, std::memory_order_relaxed);
-    else if (kind == "tls_auth")
-        soft_tls_auth_.fetch_add(1, std::memory_order_relaxed);
-    else if (kind == "io")
-        soft_io_.fetch_add(1, std::memory_order_relaxed);
-    else if (kind == "redirect")
-        soft_redirect_.fetch_add(1, std::memory_order_relaxed);
-    else
-        soft_other_.fetch_add(1, std::memory_order_relaxed);
+    size_t idx = kSoftFaultKinds.size() - 1;  // "other"
+    for (size_t i = 0; i + 1 < kSoftFaultKinds.size(); ++i) {
+        if (kind == kSoftFaultKinds[i]) {
+            idx = i;
+            break;
+        }
+    }
+    soft_faults_by_kind_[idx].fetch_add(1, std::memory_order_relaxed);
 }
 
 void MetricsRegistry::SetInflight(uint64_t live, uint64_t peak) {
@@ -200,42 +175,18 @@ MetricsSnapshot MetricsRegistry::Snapshot(double wall_s) {
     s.cpu_seconds_total = static_cast<double>(cpu_us_.load(std::memory_order_relaxed)) / 1e6;
     s.process_resident_memory_bytes = rss_bytes_.load(std::memory_order_relaxed);
 
-    if (have_rate_sample_) {
-        const double dw = wall_s - last_rate_wall_s_;
-        if (dw > 0.0) {
-            const uint64_t db = s.bytes_read_total - last_rate_bytes_;
-            s.achieved_rate_bytes = static_cast<double>(db) / dw;
-        }
-    } else if (wall_s > 0.0) {
-        s.achieved_rate_bytes = static_cast<double>(s.bytes_read_total) / wall_s;
+    if (s.wall_s > 0.0) {
+        s.achieved_rate_bytes = static_cast<double>(s.bytes_read_total) / s.wall_s;
     }
-    have_rate_sample_ = true;
-    last_rate_wall_s_ = wall_s;
-    last_rate_bytes_ = s.bytes_read_total;
 
-    auto add_err = [&](const char* name, const std::atomic<uint64_t>& c) {
-        const uint64_t v = c.load(std::memory_order_relaxed);
-        if (v > 0) s.errors_by_class[name] = v;
-    };
-    add_err("auth", err_auth_);
-    add_err("timeout", err_timeout_);
-    add_err("connection", err_connection_);
-    add_err("server_error", err_server_error_);
-    add_err("not_found", err_not_found_);
-    add_err("client_error", err_client_error_);
-    add_err("redirect_loop", err_redirect_loop_);
-    add_err("unknown", err_unknown_);
-
-    auto add_soft = [&](const char* name, const std::atomic<uint64_t>& c) {
-        const uint64_t v = c.load(std::memory_order_relaxed);
-        if (v > 0) s.soft_faults_by_kind[name] = v;
-    };
-    add_soft("connection", soft_connection_);
-    add_soft("timeout", soft_timeout_);
-    add_soft("tls_auth", soft_tls_auth_);
-    add_soft("io", soft_io_);
-    add_soft("redirect", soft_redirect_);
-    add_soft("other", soft_other_);
+    for (size_t i = 0; i < errors_by_class_.size(); ++i) {
+        const uint64_t v = errors_by_class_[i].load(std::memory_order_relaxed);
+        if (v > 0) s.errors_by_class[ErrorClassName(static_cast<ErrorClass>(i))] = v;
+    }
+    for (size_t i = 0; i < soft_faults_by_kind_.size(); ++i) {
+        const uint64_t v = soft_faults_by_kind_[i].load(std::memory_order_relaxed);
+        if (v > 0) s.soft_faults_by_kind[kSoftFaultKinds[i]] = v;
+    }
     return s;
 }
 
