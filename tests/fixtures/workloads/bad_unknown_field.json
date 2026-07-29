@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "run_id": "x",
+  "duration": "30s",
+  "auth": { "mode": "x509" },
+  "unexpected": true,
+  "targets": [
+    {
+      "name": "t0",
+      "endpoint": "root://localhost:10945/",
+      "filelist": "files.txt",
+      "pattern": { "type": "sequential" }
+    }
+  ]
+}

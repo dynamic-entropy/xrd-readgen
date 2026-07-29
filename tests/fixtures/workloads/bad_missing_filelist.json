@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "run_id": "x",
+  "duration": "30s",
+  "auth": { "mode": "x509" },
+  "targets": [
+    {
+      "name": "t0",
+      "endpoint": "root://localhost:10945/",
+      "filelist": "does-not-exist.txt",
+      "pattern": { "type": "sequential" }
+    }
+  ]
+}

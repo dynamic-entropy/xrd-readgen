@@ -11,6 +11,9 @@
 #include "readgen/run_command.hh"
 #include "readgen/run_config.hh"
 #include "readgen/units.hh"
+#include "readgen/workload_spec.hh"
+
+#include <fstream>
 
 namespace {
 
@@ -97,9 +100,11 @@ int main(int argc, char** argv) {
                       "Do not DELETE Pushgateway group on exit");
     run_cmd->add_flag("--dry-run", run_cfg.dry_run, "Print resolved config; no I/O");
 
-    auto* validate_cmd = app.add_subcommand("validate", "Validate a workload menu");
+    auto* validate_cmd = app.add_subcommand("validate", "Validate a workload JSON (no XRootD I/O)");
     std::string workload;
-    validate_cmd->add_option("workload", workload, "workload YAML")->required();
+    std::string validate_out;
+    validate_cmd->add_option("workload", workload, "workload JSON")->required();
+    validate_cmd->add_option("--out", validate_out, "Write canonical resolved JSON to PATH");
     auto* probe_cmd = app.add_subcommand("probe", "Pre-flight open+TTFB probe of a filelist");
     auto* report_cmd = app.add_subcommand("report", "Summarize a run from its result files");
     auto* version_cmd = app.add_subcommand("version", "Version info");
@@ -134,7 +139,35 @@ int main(int argc, char** argv) {
         return readgen::RunRunCommand(run_cfg);
     }
 
-    if (validate_cmd->parsed()) return NotImplemented("validate", "menu load");
+    if (validate_cmd->parsed()) {
+        const auto result = readgen::ValidateWorkloadFile(workload);
+        if (!result.ok) {
+            for (const auto& issue : result.issues) {
+                if (issue.field.empty()) {
+                    std::fprintf(stderr, "error: %s\n", issue.message.c_str());
+                } else {
+                    std::fprintf(stderr, "%s: %s\n", issue.field.c_str(), issue.message.c_str());
+                }
+            }
+            return 2;
+        }
+        if (!validate_out.empty()) {
+            std::ofstream out(validate_out);
+            if (!out) {
+                std::fprintf(stderr, "error: cannot write %s\n", validate_out.c_str());
+                return 2;
+            }
+            out << result.canonical_json;
+            if (!out) {
+                std::fprintf(stderr, "error: failed writing %s\n", validate_out.c_str());
+                return 2;
+            }
+        } else {
+            std::fputs(result.canonical_json.c_str(), stdout);
+        }
+        std::fprintf(stderr, "workload_hash=%s\n", result.workload_hash.c_str());
+        return 0;
+    }
     if (probe_cmd->parsed()) return NotImplemented("probe", "coming later");
     if (report_cmd->parsed()) return NotImplemented("report", "coming later");
     if (version_cmd->parsed()) {
