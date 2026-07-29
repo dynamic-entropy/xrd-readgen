@@ -69,53 +69,57 @@ target_link_libraries(xrd-readgen PRIVATE
 
 install(TARGETS xrd-readgen RUNTIME DESTINATION bin)
 
-enable_testing()
+option(READGEN_ENABLE_TESTS "Build unit tests" ON)
 
-FetchContent_Declare(googletest
-  URL https://github.com/google/googletest/archive/refs/tags/v1.15.2.tar.gz
-  DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
-set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googletest)
+if(READGEN_ENABLE_TESTS)
+  enable_testing()
 
-add_executable(xrd-readgen-tests
-  tests/test_units.cc
-  tests/test_token_bucket.cc
-  tests/test_error_classifier.cc
-  tests/test_auto_max_bytes.cc
-  tests/test_metrics.cc
-  tests/test_file_sink.cc
-  tests/test_prom_encode.cc
-  tests/test_soft_fault.cc
-  tests/test_workload_spec.cc
-  tests/test_auth_check.cc
-  tests/test_probe_command.cc
-  tests/test_workload_run_command.cc
-  tests/stub_run_command.cc
-  src/units.cc
-  src/token_bucket.cc
-  src/error_classifier.cc
-  src/run_config.cc
-  src/metrics.cc
-  src/file_sink.cc
-  src/prom_encode.cc
-  src/soft_fault_log.cc
-  src/workload_spec.cc
-  src/auth_check.cc
-  src/probe_command.cc
-  src/workload_run_command.cc
-  src/xrdcl_env.cc
-  src/inflight.cc
-  src/file_session.cc)
+  FetchContent_Declare(googletest
+    URL https://github.com/google/googletest/archive/refs/tags/v1.15.2.tar.gz
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+  set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+  set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
+  set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+  FetchContent_MakeAvailable(googletest)
 
-target_include_directories(xrd-readgen-tests PRIVATE include)
-target_compile_options(xrd-readgen-tests PRIVATE -Wall -Wextra)
-target_link_libraries(xrd-readgen-tests PRIVATE
-  GTest::gtest_main
-  nlohmann_json::nlohmann_json
-  XRootD::XrdCl
-  OpenSSL::Crypto)
+  add_executable(xrd-readgen-tests
+    tests/test_units.cc
+    tests/test_token_bucket.cc
+    tests/test_error_classifier.cc
+    tests/test_auto_max_bytes.cc
+    tests/test_metrics.cc
+    tests/test_file_sink.cc
+    tests/test_prom_encode.cc
+    tests/test_soft_fault.cc
+    tests/test_workload_spec.cc
+    tests/test_auth_check.cc
+    tests/test_probe_command.cc
+    tests/test_workload_run_command.cc
+    tests/stub_run_command.cc
+    src/units.cc
+    src/token_bucket.cc
+    src/error_classifier.cc
+    src/run_config.cc
+    src/metrics.cc
+    src/file_sink.cc
+    src/prom_encode.cc
+    src/soft_fault_log.cc
+    src/workload_spec.cc
+    src/auth_check.cc
+    src/probe_command.cc
+    src/workload_run_command.cc
+    src/xrdcl_env.cc
+    src/inflight.cc
+    src/file_session.cc)
 
-include(GoogleTest)
-gtest_discover_tests(xrd-readgen-tests)
+  target_include_directories(xrd-readgen-tests PRIVATE include)
+  target_compile_options(xrd-readgen-tests PRIVATE -Wall -Wextra)
+  target_link_libraries(xrd-readgen-tests PRIVATE
+    GTest::gtest_main
+    nlohmann_json::nlohmann_json
+    XRootD::XrdCl
+    OpenSSL::Crypto)
+
+  include(GoogleTest)
+  gtest_discover_tests(xrd-readgen-tests)
+endif()

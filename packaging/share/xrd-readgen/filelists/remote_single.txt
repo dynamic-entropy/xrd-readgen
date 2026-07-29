@@ -1,0 +1,2 @@
+# Placeholder LFN — not a real CMS path.
+/store/example/dataset/file-001.root

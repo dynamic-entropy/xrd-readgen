@@ -8,7 +8,40 @@ federation redirectors or individual servers).
 Client-side metrics (open latency, TTFB, per-op latency, redirect depth, error classes)
 are pushed to a Prometheus Pushgateway and/or written as result files.
 
-## Build
+## Install (linux/amd64 VM)
+
+From [GitHub Releases](https://github.com/dynamic-entropy/xrd-readgen/releases)
+(requires `xrootd-client` on the host):
+
+```sh
+curl -fsSL https://github.com/dynamic-entropy/xrd-readgen/releases/latest/download/install.sh | sudo bash
+```
+
+| Path | Role |
+|---|---|
+| `/usr/local/bin/xrd-readgen` | binary |
+| `/etc/xrd-readgen/` | config (`workloads/`, `filelists/`) |
+| `/var/lib/xrd-readgen/results` | FileSink output |
+
+Sanitized placeholder examples are seeded into `/etc/xrd-readgen` on first install.
+Replace or add site workloads/filelists there under normal names (e.g.
+`/etc/xrd-readgen/workloads/aaa-global.json`).
+
+```sh
+xrd-readgen validate /etc/xrd-readgen/workloads/example.json
+xrd-readgen run /etc/xrd-readgen/workloads/aaa-global.json
+```
+
+Build a release tarball locally (Podman/Docker, `--platform=linux/amd64`):
+
+```sh
+./scripts/build-release.sh   # → dist/xrd-readgen-*-linux-amd64.tar.gz
+```
+
+Tagging `v*` on GitHub runs [`.github/workflows/release.yml`](.github/workflows/release.yml)
+and publishes the tarball + `install.sh`.
+
+## Build from source
 
 Requires CMake >= 3.24, a C++17 compiler, and XRootD client libraries
 (`brew install xrootd` / EPEL `xrootd-client-devel`, or point `-DXRootD_DIR`

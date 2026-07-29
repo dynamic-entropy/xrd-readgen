@@ -1,10 +1,12 @@
 build/
 .cache/
+dist/
 docs/
 compile_commands.json
 proxy
 results/
 
+# Real AAA / site configs (filenames + hostnames) — keep local only
 **/*.local.json
 **/*.local.txt
 **/*.local.yaml

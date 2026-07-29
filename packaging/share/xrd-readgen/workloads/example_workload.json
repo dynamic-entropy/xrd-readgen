@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "run_id": "aaa-global-smoke",
+  "duration": "3m",
+  "seed": 1,
+  "auth": {
+    "mode": "x509"
+  },
+  "targets": [
+    {
+      "name": "aaa-global",
+      "endpoint": "root://xrootd-redirector.example/",
+      "filelist": "../filelists/remote.txt",
+      "target_rate": "35MBps",
+      "workers": 8,
+      "pattern": {
+        "type": "sequential",
+        "read_size": "1MiB",
+        "file_fraction": 1.0,
+        "max_bytes": "auto"
+      }
+    }
+  ],
+  "client_tuning": {
+    "session_timeout": "60s",
+    "connection_window": 15,
+    "connection_retry": 2,
+    "request_timeout": 60
+  },
+  "sinks": {
+    "results_dir": "/var/lib/xrd-readgen/results",
+    "snapshot_interval": "5s",
+    "write_results": true,
+    "pushgateway": {
+      "url": "http://pushgateway.example:9091",
+      "job": "xrd-readgen",
+      "keep": false
+    }
+  }
+}

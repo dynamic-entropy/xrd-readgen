@@ -1,0 +1,11 @@
+build/
+.cache/
+dist/
+docs/
+results/
+proxy
+.git/
+**/*.local.json
+**/*.local.txt
+**/*.local.yaml
+compile_commands.json

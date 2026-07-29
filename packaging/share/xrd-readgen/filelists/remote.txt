@@ -1,0 +1,5 @@
+# Placeholder LFNs for docs / install seed — not real CMS paths.
+/store/example/dataset/file-001.root
+/store/example/dataset/file-002.root
+/store/example/dataset/file-003.root
+/store/example/dataset/file-004.root

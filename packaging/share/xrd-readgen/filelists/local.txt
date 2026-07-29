@@ -1,0 +1,2 @@
+# Paths relative to the xrootd export root (see dev/local-server.sh).
+/tmp/xrd-readgen-data/test-256M.bin
