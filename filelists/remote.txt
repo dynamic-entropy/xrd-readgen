@@ -1,0 +1,6 @@
+# Placeholder LFNs for docs / CI — not real CMS paths.
+# Copy to remote.local.txt and replace with approved challenge files for real AAA runs.
+/store/example/dataset/file-001.root
+/store/example/dataset/file-002.root
+/store/example/dataset/file-003.root
+/store/example/dataset/file-004.root

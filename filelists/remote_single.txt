@@ -1,0 +1,3 @@
+# Placeholder LFN for docs / CI — not a real CMS path.
+# Copy to remote_single.local.txt for real AAA single-file probes.
+/store/example/dataset/file-001.root

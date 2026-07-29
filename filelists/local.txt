@@ -1,0 +1,4 @@
+# Paths relative to the xrootd export root (see dev/local-server.sh).
+# local-server serves DATA_DIR; the test file lives at DATA_DIR/test-256M.bin.
+# Use the absolute path that xrootd exposes:
+/tmp/xrd-readgen-data/test-256M.bin

@@ -1,8 +1,10 @@
 build/
 .cache/
 docs/
-filelists/
 compile_commands.json
 proxy
 results/
-workloads/
+
+**/*.local.json
+**/*.local.txt
+**/*.local.yaml
