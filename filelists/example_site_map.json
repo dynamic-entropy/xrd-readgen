@@ -1,0 +1,5 @@
+{
+  "*.fnal.gov": "T1_US_FNAL",
+  "*.cern.ch": "T2_CH_CERN",
+  "*.infn.it": "T2_IT_Rome"
+}

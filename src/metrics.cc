@@ -115,8 +115,34 @@ void MetricsRegistry::SetConfigGauges(uint64_t target_rate_bps, uint32_t workers
     workers_configured_.store(workers, std::memory_order_relaxed);
 }
 
+void MetricsRegistry::SetSiteMap(const SiteMap* map) { site_map_ = map; }
+
+void MetricsRegistry::AttributeLocked(const std::string& data_server, bool ok, uint64_t bytes,
+                                      ErrorClass error_class, const std::string& cms_site) {
+    const std::string key = data_server.empty() ? kUnknownDataServer : data_server;
+    EndpointStats& ep = by_data_server_[key];
+    ep.data_server = key;
+    if (ep.cms_site.empty()) {
+        if (!cms_site.empty()) {
+            ep.cms_site = cms_site;
+        } else if (site_map_ != nullptr) {
+            ep.cms_site = site_map_->Lookup(key);
+        }
+    }
+    if (ok) {
+        ep.bytes_read += bytes;
+        ++ep.sessions_ok;
+    } else {
+        ++ep.sessions_fail;
+        if (error_class != ErrorClass::None) {
+            ep.errors_by_class[ErrorClassName(error_class)] += 1;
+        }
+    }
+}
+
 void MetricsRegistry::ObserveSessionOk(uint64_t bytes, uint64_t ops, double open_s, double ttfb_s,
-                                       double read_s, double redirects) {
+                                       double read_s, double redirects, const std::string& data_server,
+                                       const std::string& cms_site) {
     bytes_read_total_.fetch_add(bytes, std::memory_order_relaxed);
     sessions_ok_.fetch_add(1, std::memory_order_relaxed);
     read_ops_total_.fetch_add(ops, std::memory_order_relaxed);
@@ -124,11 +150,18 @@ void MetricsRegistry::ObserveSessionOk(uint64_t bytes, uint64_t ops, double open
     ttfb_seconds_.Observe(ttfb_s);
     read_seconds_.Observe(read_s);
     redirects_per_open_.Observe(redirects);
+
+    std::lock_guard<std::mutex> lock(endpoint_mu_);
+    AttributeLocked(data_server, true, bytes, ErrorClass::None, cms_site);
 }
 
-void MetricsRegistry::ObserveSessionFail(ErrorClass error_class) {
+void MetricsRegistry::ObserveSessionFail(ErrorClass error_class, const std::string& data_server,
+                                         const std::string& cms_site) {
     sessions_fail_.fetch_add(1, std::memory_order_relaxed);
     errors_by_class_[static_cast<size_t>(error_class)].fetch_add(1, std::memory_order_relaxed);
+
+    std::lock_guard<std::mutex> lock(endpoint_mu_);
+    AttributeLocked(data_server, false, 0, error_class, cms_site);
 }
 
 void MetricsRegistry::ObserveSoftFault(const std::string& kind) {
@@ -145,6 +178,27 @@ void MetricsRegistry::ObserveSoftFault(const std::string& kind) {
 void MetricsRegistry::SetInflight(uint64_t live, uint64_t peak) {
     inflight_reads_.store(live, std::memory_order_relaxed);
     peak_inflight_.store(peak, std::memory_order_relaxed);
+}
+
+void MetricsRegistry::SetCmsSite(const std::string& data_server, const std::string& cms_site) {
+    if (data_server.empty() || cms_site.empty()) return;
+    const std::string key = data_server;
+    std::lock_guard<std::mutex> lock(endpoint_mu_);
+    auto it = by_data_server_.find(key);
+    if (it == by_data_server_.end()) return;
+    it->second.cms_site = cms_site;
+}
+
+std::vector<std::string> MetricsRegistry::DataServersMissingSite() const {
+    std::vector<std::string> out;
+    std::lock_guard<std::mutex> lock(endpoint_mu_);
+    out.reserve(by_data_server_.size());
+    for (const auto& kv : by_data_server_) {
+        if (kv.second.cms_site.empty() && kv.first != kUnknownDataServer) {
+            out.push_back(kv.first);
+        }
+    }
+    return out;
 }
 
 void MetricsRegistry::SampleProc() {
@@ -186,6 +240,23 @@ MetricsSnapshot MetricsRegistry::Snapshot(double wall_s) {
     for (size_t i = 0; i < soft_faults_by_kind_.size(); ++i) {
         const uint64_t v = soft_faults_by_kind_[i].load(std::memory_order_relaxed);
         if (v > 0) s.soft_faults_by_kind[kSoftFaultKinds[i]] = v;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(endpoint_mu_);
+        s.by_data_server = by_data_server_;
+    }
+    for (const auto& kv : s.by_data_server) {
+        const EndpointStats& ep = kv.second;
+        if (ep.cms_site.empty()) continue;
+        SiteStats& site = s.by_cms_site[ep.cms_site];
+        site.cms_site = ep.cms_site;
+        site.bytes_read += ep.bytes_read;
+        site.sessions_ok += ep.sessions_ok;
+        site.sessions_fail += ep.sessions_fail;
+        for (const auto& err : ep.errors_by_class) {
+            site.errors_by_class[err.first] += err.second;
+        }
     }
     return s;
 }

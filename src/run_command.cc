@@ -8,6 +8,8 @@
 #include "readgen/metrics.hh"
 #include "readgen/pushgateway_sink.hh"
 #include "readgen/scheduler.hh"
+#include "readgen/site_map.hh"
+#include "readgen/sitename_resolver.hh"
 #include "readgen/soft_fault_log.hh"
 #include "readgen/token_bucket.hh"
 #include "readgen/units.hh"
@@ -83,6 +85,9 @@ void PrintDryRun(const RunConfig& cfg) {
     if (!cfg.pushgateway_url.empty()) {
         std::printf("push_job:       %s\n", cfg.pushgateway_job.c_str());
     }
+    std::printf("site_map:       %s\n",
+                cfg.site_map_path.empty() ? "(none)" : cfg.site_map_path.c_str());
+    std::printf("sitename_query: %s\n", cfg.sitename_query ? "on" : "off");
     std::printf("dry_run:        true (no I/O)\n");
     if (!cfg.files.empty()) {
         std::printf("example URL:    %s\n", JoinUrl(cfg.endpoint, cfg.files.front()).c_str());
@@ -92,6 +97,26 @@ void PrintDryRun(const RunConfig& cfg) {
 int RunEngine(const RunConfig& cfg) {
     ApplyXrdClTimeouts(cfg.connection_window_s, cfg.connection_retry, cfg.request_timeout_s,
                        cfg.session_timeout_s);
+
+    SiteMap site_map;
+    const SiteMap* site_map_ptr = nullptr;
+    if (!cfg.site_map_path.empty()) {
+        try {
+            site_map = SiteMap::LoadFile(cfg.site_map_path);
+            site_map_ptr = &site_map;
+            std::fprintf(stderr, "site_map: loaded %zu entries from %s\n", site_map.size(),
+                         cfg.site_map_path.c_str());
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "error: %s\n", e.what());
+            return 2;
+        }
+    }
+
+    SitenameResolver sitename_resolver;
+    if (cfg.sitename_query) {
+        std::fprintf(stderr,
+                     "sitename_query: on (background thread; independent of I/O and scheduling)\n");
+    }
 
     // Burst covers a full worker pipeline so the rate limiter can admit a full
     // set of in-flight session charges without waiting on a 1-charge refill.
@@ -104,6 +129,19 @@ int RunEngine(const RunConfig& cfg) {
     const std::string job_id = cfg.job_id.empty() ? DefaultJobId() : cfg.job_id;
     registry.SetLabels(cfg.run_id, job_id, cfg.target, cfg.endpoint);
     registry.SetConfigGauges(cfg.target_rate_bps, cfg.workers);
+
+    // Never call sync XrdCl Query from a session completion callback — it deadlocks
+    // the client event loop (achieved rate sticks at 0). Resolve on the background
+    // site thread instead.
+    auto fill_cms_sites = [&] {
+        const auto missing = registry.DataServersMissingSite();
+        for (const auto& ds : missing) {
+            std::string site;
+            if (cfg.sitename_query) site = sitename_resolver.Resolve(ds);
+            if (site.empty() && site_map_ptr != nullptr) site = site_map_ptr->Lookup(ds);
+            if (!site.empty()) registry.SetCmsSite(ds, site);
+        }
+    };
     SoftFaultLogOut::Install(&registry);
     struct SoftFaultGuard {
         ~SoftFaultGuard() { SoftFaultLogOut::TearDown(); }
@@ -196,6 +234,21 @@ int RunEngine(const RunConfig& cfg) {
         }
     });
 
+    // Sitename queries run on their own thread — never on XrdCl callbacks (deadlock)
+    // and never on the snapshot timer (would delay Pushgateway pushes).
+    std::atomic<bool> stop_sites{false};
+    std::thread site_thread;
+    if (cfg.sitename_query || site_map_ptr != nullptr) {
+        site_thread = std::thread([&] {
+            while (!stop_sites.load(std::memory_order_acquire)) {
+                fill_cms_sites();
+                for (int i = 0; i < 20 && !stop_sites.load(std::memory_order_acquire); ++i) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                }
+            }
+        });
+    }
+
     while (Clock::now() < deadline) {
         if (!inflight.AcquireUntil(deadline)) break;
 
@@ -210,14 +263,16 @@ int RunEngine(const RunConfig& cfg) {
         registry.SetInflight(live.load(std::memory_order_relaxed), inflight.peak());
 
         StartFileSession(work.session, [&, charged](FileSessionResult result) {
+            // Do not Query sitename here — sync XrdCl from this callback deadlocks.
             if (result.ok) {
                 registry.ObserveSessionOk(result.bytes_read, result.ops, result.open_ms / 1000.0,
                                           result.ttfb_ms / 1000.0, result.read_s,
-                                          static_cast<double>(result.open_hosts));
+                                          static_cast<double>(result.open_hosts),
+                                          result.data_server);
             } else {
                 const ErrorClass cls =
                     ClassifyXRootDError(result.status_code, result.err_code, result.error);
-                registry.ObserveSessionFail(cls);
+                registry.ObserveSessionFail(cls, result.data_server);
                 // Log the first few failures, plus the first few wall timeouts
                 // even if other error kinds already used up the budget.
                 const uint64_t nth_fail = fail_count.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -226,12 +281,21 @@ int RunEngine(const RunConfig& cfg) {
                         ? wall_timeout_count.fetch_add(1, std::memory_order_relaxed) + 1
                         : 0;
                 if (nth_fail <= 5 || (result.timed_out && nth_timeout <= 3)) {
+                    // url is the request URL (often the global redirector + LFN). Log the
+                    // resolved DataServer host and basename only — not the full path.
+                    const char* ds =
+                        result.data_server.empty() ? "(unknown)" : result.data_server.c_str();
+                    std::string file = "(unknown)";
+                    if (!result.url.empty()) {
+                        const auto slash = result.url.rfind('/');
+                        file = slash == std::string::npos ? result.url : result.url.substr(slash + 1);
+                        if (file.empty()) file = "(unknown)";
+                    }
                     std::fprintf(stderr,
-                                 "session error: %s (bytes_read=%" PRIu64
-                                 ", workers=%" PRIu32 "/%" PRIu32
-                                 "; wall timeout = Open→Close exceeded --session-timeout)\n",
-                                 result.error.c_str(), result.bytes_read, inflight.current(),
-                                 inflight.max());
+                                 "session error: %s data_server=%s file=%s "
+                                 "bytes_read=%" PRIu64 " ops=%" PRIu64 " open_ms=%.0f total_s=%.1f\n",
+                                 result.error.c_str(), ds, file.c_str(), result.bytes_read,
+                                 result.ops, result.open_ms, result.total_s);
                 }
             }
 
@@ -267,9 +331,13 @@ int RunEngine(const RunConfig& cfg) {
     stop_timer.store(true, std::memory_order_release);
     if (timer.joinable()) timer.join();
 
+    stop_sites.store(true, std::memory_order_release);
+    if (site_thread.joinable()) site_thread.join();
+
     const double elapsed = std::chrono::duration<double>(Clock::now() - t0).count();
     if (sink || push) registry.SampleProc();
     registry.SetInflight(live.load(std::memory_order_relaxed), inflight.peak());
+    fill_cms_sites();
     const MetricsSnapshot final_snap = registry.Snapshot(elapsed);
 
     if (sink) {
@@ -320,6 +388,43 @@ int RunEngine(const RunConfig& cfg) {
         for (const auto& e : final_snap.soft_faults_by_kind) {
             std::printf("  %-14s %" PRIu64 "\n", e.first.c_str(), e.second);
         }
+    }
+
+    // Console summary is by CMS site. Per-DataServer detail stays in FileSink + D2.
+    if (!final_snap.by_cms_site.empty()) {
+        std::printf("by_cms_site:\n");
+        for (const auto& kv : final_snap.by_cms_site) {
+            const SiteStats& site = kv.second;
+            std::printf("  %-24s bytes=%-12s ok=%" PRIu64 " fail=%" PRIu64 "\n",
+                        site.cms_site.c_str(), FormatBytes(site.bytes_read).c_str(),
+                        site.sessions_ok, site.sessions_fail);
+        }
+    }
+
+    uint64_t unmapped_bytes = 0;
+    uint64_t unmapped_ok = 0;
+    uint64_t unmapped_fail = 0;
+    size_t unmapped_servers = 0;
+    for (const auto& kv : final_snap.by_data_server) {
+        if (!kv.second.cms_site.empty()) continue;
+        ++unmapped_servers;
+        unmapped_bytes += kv.second.bytes_read;
+        unmapped_ok += kv.second.sessions_ok;
+        unmapped_fail += kv.second.sessions_fail;
+    }
+    if (unmapped_servers > 0) {
+        std::printf("unmapped:       %zu data_server(s) bytes=%s ok=%" PRIu64 " fail=%" PRIu64
+                    " (detail: result.json by_data_server / Grafana D2)\n",
+                    unmapped_servers, FormatBytes(unmapped_bytes).c_str(), unmapped_ok,
+                    unmapped_fail);
+        if (cfg.site_map_path.empty() && !cfg.sitename_query) {
+            std::printf("hint:          enable sitename query (default) or --site-map for by_cms_site\n");
+        } else if (cfg.site_map_path.empty()) {
+            std::printf("hint:          some servers omit sitename; optional --site-map for overrides\n");
+        }
+    } else if (final_snap.by_cms_site.empty() && !final_snap.by_data_server.empty()) {
+        std::printf("data_servers:   %zu (no cms_site map hits; detail in result.json / D2)\n",
+                    final_snap.by_data_server.size());
     }
 
     // Join the shared deadline thread before process teardown — a detached

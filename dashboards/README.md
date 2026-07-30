@@ -5,9 +5,16 @@ stack is **not** shipped in this repo — only dashboard definitions.
 
 | File | Story |
 |---|---|
-| [`xrd-readgen-d1.json`](xrd-readgen-d1.json) | **D1 Challenge Overview** — achieved vs target, success rate, inflight, hard errors, **soft faults**, open/TTFB, bytes/CPU-sec |
+| [`xrd-readgen-d1.json`](xrd-readgen-d1.json) | **D1 Challenge Overview** — achieved vs target, success rate, inflight, hard/soft errors, open/TTFB, bytes/CPU-sec, **achieved rate + FileSessions by CMS site and DataServer** |
 
 **Hard vs soft:** `readgen_errors_total` = failed sessions; `readgen_soft_faults_total` = XrdCl Error log lines (e.g. connection reset) even when the session still completes ok.
+
+**Attribution (Phase 3A):** Site/server throughput uses the same definition as
+the overall panel: gauges `readgen_site_achieved_rate_bytes` /
+`readgen_endpoint_achieved_rate_bytes` (`bytes / wall`). Do **not** prefer
+`rate(*_bytes_total)` here — Pushgateway scrapes make PromQL `rate()` noisy /
+false-zero when a label is idle. FileSessions panels count completed
+Open→…→Close work items — **not** TCP connections.
 
 ## Import (xrdmon)
 
@@ -28,7 +35,9 @@ Re-import (or overwrite) after dashboard JSON updates.
   --run-id demo
 ```
 
-Soft-fault counting requires XrdCl Error logs to be emitted (default / `XRD_LOGLEVEL=Info` is fine).
+Soft-fault counting requires XrdCl Error logs (default / `XRD_LOGLEVEL=Info`).
+Site panels fill from live `query config sitename` (deferred off the I/O path;
+cached per DataServer). Optional `--site-map` is fallback only.
 
 ### Throughput on D1
 
@@ -49,5 +58,5 @@ Defaults that bound stuck peers: `--session-timeout 60s`,
 
 Re-import D1 after JSON updates. Use `--snapshot-interval` ≤ scrape interval (often 15s).
 
-**Ground truth:** `results/<dir>/<run_id>/result.json` and `metrics.jsonl`.
-If JSONL holds the target but Grafana does not, re-import this D1 JSON.
+**Ground truth:** `results/<dir>/<run_id>/result.json` and `metrics.jsonl`
+(`by_data_server` / `by_cms_site`).

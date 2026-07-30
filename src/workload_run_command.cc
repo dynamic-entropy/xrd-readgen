@@ -66,6 +66,10 @@ int RunWorkloadCommand(const WorkloadRunOptions& opts) {
     cfg.dry_run = opts.dry_run;
     cfg.workload_hash = validated.workload_hash;
     cfg.workload_resolved_json = validated.canonical_json;
+    if (!opts.site_map_path.empty()) {
+        cfg.site_map_path = opts.site_map_path;
+    }
+    cfg.sitename_query = opts.sitename_query;
 
     std::fprintf(stderr, "workload_hash=%s\n", validated.workload_hash.c_str());
 

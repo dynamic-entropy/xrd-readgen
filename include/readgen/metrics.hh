@@ -2,11 +2,13 @@
 #define READGEN_METRICS_HH
 
 #include "readgen/error_classifier.hh"
+#include "readgen/site_map.hh"
 
 #include <array>
 #include <atomic>
 #include <cstdint>
 #include <map>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -26,6 +28,9 @@ inline constexpr std::array<double, 15> kLatencyBucketBounds = {
 
 inline constexpr size_t kHistogramBuckets = kLatencyBucketBounds.size() + 1;  // +Inf
 
+// Sentinel key when FileSessionResult::data_server is empty.
+inline constexpr const char* kUnknownDataServer = "unknown";
+
 struct HistogramSnapshot {
     std::vector<double> bounds;       // finite upper bounds (excludes +Inf)
     std::vector<uint64_t> counts;     // non-cumulative per-bucket (+Inf last)
@@ -35,6 +40,25 @@ struct HistogramSnapshot {
 
 // Derive percentile from non-cumulative bucket counts (p in [0, 1]).
 double HistogramPercentile(const HistogramSnapshot& h, double p);
+
+// Per resolved data server (and optional CMS site) attribution.
+struct EndpointStats {
+    std::string data_server;
+    std::string cms_site;  // empty if unmapped
+    uint64_t bytes_read = 0;
+    uint64_t sessions_ok = 0;
+    uint64_t sessions_fail = 0;
+    std::map<std::string, uint64_t> errors_by_class;
+};
+
+// Rollup of EndpointStats that share the same cms_site (mapped only).
+struct SiteStats {
+    std::string cms_site;
+    uint64_t bytes_read = 0;
+    uint64_t sessions_ok = 0;
+    uint64_t sessions_fail = 0;
+    std::map<std::string, uint64_t> errors_by_class;
+};
 
 struct MetricsSnapshot {
     std::string run_id;
@@ -58,6 +82,10 @@ struct MetricsSnapshot {
 
     std::map<std::string, uint64_t> errors_by_class;
     std::map<std::string, uint64_t> soft_faults_by_kind;
+
+    // Independent keys — no top-N / "other" collapsing.
+    std::map<std::string, EndpointStats> by_data_server;
+    std::map<std::string, SiteStats> by_cms_site;
 
     uint64_t inflight_reads = 0;
     uint64_t peak_inflight = 0;
@@ -93,13 +121,25 @@ public:
     void SetLabels(std::string run_id, std::string job_id, std::string target, std::string endpoint);
     void SetConfigGauges(uint64_t target_rate_bps, uint32_t workers);
 
+    // Optional CMS site map for clean hostname→site attribution. Not owned.
+    void SetSiteMap(const SiteMap* map);
+
     void ObserveSessionOk(uint64_t bytes, uint64_t ops, double open_s, double ttfb_s, double read_s,
-                          double redirects);
-    void ObserveSessionFail(ErrorClass error_class);
+                          double redirects, const std::string& data_server = {},
+                          const std::string& cms_site = {});
+    void ObserveSessionFail(ErrorClass error_class, const std::string& data_server = {},
+                            const std::string& cms_site = {});
     // XrdCl Error-level log lines (may not fail a session — soft faults).
     // `kind` should come from ClassifySoftFaultMessage; unknown kinds count as "other".
     void ObserveSoftFault(const std::string& kind);
     void SetInflight(uint64_t live, uint64_t peak);
+
+    // Attach/replace cms_site for an already-seen data_server (safe off the XrdCl
+    // callback path — used after deferred sitename queries).
+    void SetCmsSite(const std::string& data_server, const std::string& cms_site);
+
+    // DataServers recorded so far with empty cms_site (for deferred resolution).
+    std::vector<std::string> DataServersMissingSite() const;
 
     // Refresh CPU/RSS from /proc (call on snapshot thread).
     void SampleProc();
@@ -108,10 +148,14 @@ public:
     MetricsSnapshot Snapshot(double wall_s);
 
 private:
+    void AttributeLocked(const std::string& data_server, bool ok, uint64_t bytes, ErrorClass error_class,
+                         const std::string& cms_site);
+
     std::string run_id_;
     std::string job_id_;
     std::string target_;
     std::string endpoint_;
+    const SiteMap* site_map_ = nullptr;
 
     std::atomic<uint64_t> bytes_read_total_{0};
     std::atomic<uint64_t> sessions_ok_{0};
@@ -132,6 +176,10 @@ private:
 
     std::atomic<uint64_t> cpu_us_{0};  // process CPU as microseconds
     std::atomic<uint64_t> rss_bytes_{0};
+
+    mutable std::mutex endpoint_mu_;
+    // data_server → counters (cms_site filled when map hits).
+    std::map<std::string, EndpointStats> by_data_server_;
 };
 
 }  // namespace readgen

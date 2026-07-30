@@ -60,6 +60,8 @@ struct SinkSpec {
     std::string job_id;
     bool write_results = true;
     PushgatewaySpec pushgateway;
+    std::string site_map;        // resolved path (empty = none)
+    std::string site_map_input;  // original JSON string
 };
 
 struct WorkloadSpec {

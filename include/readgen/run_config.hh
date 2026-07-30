@@ -52,6 +52,11 @@ struct RunConfig {
     std::string auth_mode;               // e.g. "x509"
     std::string workload_hash;           // SHA-256 of canonical resolved JSON
     std::string workload_resolved_json;  // canonical JSON text written beside results
+
+    // Optional JSON host→CMS-site map (override / fallback for sitename query).
+    std::string site_map_path;
+    // Query each unique DataServer for `config sitename` (cached). Default on.
+    bool sitename_query = true;
 };
 
 const char* PatternTypeName(PatternType t);

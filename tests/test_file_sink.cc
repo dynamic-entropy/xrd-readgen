@@ -32,7 +32,7 @@ TEST_F(FileSinkTest, WritesJsonlAndResult) {
     MetricsRegistry reg;
     reg.SetLabels("t1", "j1", "default", "root://localhost:10945/");
     reg.SetConfigGauges(10 * 1024 * 1024, 4);
-    reg.ObserveSessionOk(1024 * 1024, 4, 0.005, 0.01, 0.2, 2.0);
+    reg.ObserveSessionOk(1024 * 1024, 4, 0.005, 0.01, 0.2, 2.0, "localhost:10945");
     reg.SampleProc();
 
     RunInfoMeta meta;
@@ -63,6 +63,8 @@ TEST_F(FileSinkTest, WritesJsonlAndResult) {
     ASSERT_TRUE(j["readgen_open_seconds"].contains("bounds"));
     ASSERT_TRUE(j["readgen_open_seconds"].contains("sum"));
     EXPECT_EQ(j["readgen_open_seconds"]["count"], 1);
+    ASSERT_TRUE(j.contains("by_data_server"));
+    EXPECT_EQ(j["by_data_server"]["localhost:10945"]["bytes_read"], 1024 * 1024);
 
     std::ifstream rf(result_path);
     auto result = json::parse(rf);
@@ -72,6 +74,8 @@ TEST_F(FileSinkTest, WritesJsonlAndResult) {
     EXPECT_TRUE(result["latency"]["open_seconds"].contains("p50"));
     EXPECT_TRUE(result.contains("readgen_bytes_per_cpu_second"));
     EXPECT_EQ(result["run_info"]["seed"], 42);
+    ASSERT_TRUE(result.contains("by_data_server"));
+    EXPECT_EQ(result["by_data_server"]["localhost:10945"]["bytes_read"], 1024 * 1024);
 }
 
 TEST_F(FileSinkTest, WritesWorkloadArtifacts) {

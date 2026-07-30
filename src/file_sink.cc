@@ -53,6 +53,30 @@ json SnapshotToJsonl(const MetricsSnapshot& s) {
     j["readgen_workers_configured"] = s.workers_configured;
     j["readgen_cpu_seconds_total"] = s.cpu_seconds_total;
     j["process_resident_memory_bytes"] = s.process_resident_memory_bytes;
+    if (!s.by_data_server.empty()) {
+        json by_ds = json::object();
+        for (const auto& kv : s.by_data_server) {
+            const EndpointStats& ep = kv.second;
+            json entry = {{"bytes_read", ep.bytes_read},
+                          {"sessions_ok", ep.sessions_ok},
+                          {"sessions_fail", ep.sessions_fail},
+                          {"errors", ep.errors_by_class}};
+            if (!ep.cms_site.empty()) entry["cms_site"] = ep.cms_site;
+            by_ds[ep.data_server] = std::move(entry);
+        }
+        j["by_data_server"] = std::move(by_ds);
+    }
+    if (!s.by_cms_site.empty()) {
+        json by_site = json::object();
+        for (const auto& kv : s.by_cms_site) {
+            const SiteStats& site = kv.second;
+            by_site[site.cms_site] = {{"bytes_read", site.bytes_read},
+                                      {"sessions_ok", site.sessions_ok},
+                                      {"sessions_fail", site.sessions_fail},
+                                      {"errors", site.errors_by_class}};
+        }
+        j["by_cms_site"] = std::move(by_site);
+    }
     return j;
 }
 
@@ -142,6 +166,31 @@ void FileSink::WriteResult(const MetricsSnapshot& snap, double cpu_seconds_at_st
     if (meta_.schema_version > 0) j["run_info"]["schema_version"] = meta_.schema_version;
     if (!meta_.auth_mode.empty()) j["run_info"]["auth_mode"] = meta_.auth_mode;
     if (!meta_.workload_hash.empty()) j["workload_hash"] = meta_.workload_hash;
+
+    if (!snap.by_data_server.empty()) {
+        json by_ds = json::object();
+        for (const auto& kv : snap.by_data_server) {
+            const EndpointStats& ep = kv.second;
+            json entry = {{"bytes_read", ep.bytes_read},
+                          {"sessions_ok", ep.sessions_ok},
+                          {"sessions_fail", ep.sessions_fail},
+                          {"errors", ep.errors_by_class}};
+            if (!ep.cms_site.empty()) entry["cms_site"] = ep.cms_site;
+            by_ds[ep.data_server] = std::move(entry);
+        }
+        j["by_data_server"] = std::move(by_ds);
+    }
+    if (!snap.by_cms_site.empty()) {
+        json by_site = json::object();
+        for (const auto& kv : snap.by_cms_site) {
+            const SiteStats& site = kv.second;
+            by_site[site.cms_site] = {{"bytes_read", site.bytes_read},
+                                      {"sessions_ok", site.sessions_ok},
+                                      {"sessions_fail", site.sessions_fail},
+                                      {"errors", site.errors_by_class}};
+        }
+        j["by_cms_site"] = std::move(by_site);
+    }
 
     const auto path = fs::path(run_dir_) / "result.json";
     std::ofstream out(path);

@@ -15,7 +15,7 @@
       }
     ]
   },
-  "description": "xrd-readgen D1 \u2014 Challenge Overview: achieved vs target, errors, inflight. Import into xrdmon/CMS Grafana; Prometheus must scrape the Pushgateway.",
+  "description": "xrd-readgen D1 \u2014 Challenge Overview: achieved vs target, errors, inflight, latency, plus federation attribution (achieved rate and FileSessions by CMS site / DataServer).",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -731,6 +731,173 @@
       ],
       "title": "Client RSS",
       "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 42 },
+      "id": 103,
+      "title": "Federation attribution",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Per CMS sitename: bytes/wall (same definition as overall readgen_achieved_rate_bytes). Stack ≈ D1 achieved when traffic is mapped. Prefer this over rate(counter) on Pushgateway.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisLabel": "MB/s",
+            "axisSoftMin": 0,
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "stacking": { "group": "A", "mode": "normal" }
+          },
+          "unit": "Bps"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 43 },
+      "id": 11,
+      "options": {
+        "legend": {
+          "calcs": ["mean", "lastNotNull"],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true,
+          "sortBy": "Last *",
+          "sortDesc": true
+        },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "sum by (cms_site) (readgen_site_achieved_rate_bytes{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"})",
+          "legendFormat": "{{cms_site}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Achieved rate by CMS site",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Per DataServer: bytes/wall (same as overall achieved). With limited workers only a few servers are hot — idle series near zero is normal.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisLabel": "MB/s",
+            "axisSoftMin": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "stacking": { "group": "A", "mode": "normal" }
+          },
+          "unit": "Bps"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 43 },
+      "id": 12,
+      "options": {
+        "legend": {
+          "calcs": ["mean", "lastNotNull"],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "sortBy": "Last *",
+          "sortDesc": true
+        },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "sum by (data_server) (readgen_endpoint_achieved_rate_bytes{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"})",
+          "legendFormat": "{{data_server}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Achieved rate by DataServer",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Completed FileSessions (Open→…→Close) per CMS site — not TCP connections.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisSoftMin": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 51 },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": ["lastNotNull"],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "sum by (cms_site, result) (readgen_site_sessions_total{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"})",
+          "legendFormat": "{{cms_site}} {{result}}",
+          "refId": "A"
+        }
+      ],
+      "title": "FileSessions by CMS site",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Completed FileSessions attributed to each resolved DataServer after redirect — not TCP connection count. XrdCl may multiplex sockets underneath.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisSoftMin": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 51 },
+      "id": 14,
+      "options": {
+        "legend": {
+          "calcs": ["lastNotNull"],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "sum by (data_server, result) (readgen_endpoint_sessions_total{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"})",
+          "legendFormat": "{{data_server}} {{result}}",
+          "refId": "A"
+        }
+      ],
+      "title": "FileSessions by DataServer",
+      "type": "timeseries"
     }
   ],
   "refresh": "10s",
@@ -832,6 +999,6 @@
   "timezone": "browser",
   "title": "xrd-readgen / D1 Challenge Overview",
   "uid": "xrd-readgen-d1",
-  "version": 6,
+  "version": 8,
   "weekStart": ""
 }

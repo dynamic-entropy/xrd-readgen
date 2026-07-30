@@ -145,6 +145,79 @@ std::string EncodePrometheusText(const MetricsSnapshot& snap) {
                    snap.process_resident_memory_bytes);
     AppendGauge(o, "readgen_wall_seconds", "Elapsed wall time of the run so far", L, snap.wall_s);
 
+    if (!snap.by_data_server.empty()) {
+        o << "# HELP readgen_endpoint_bytes_total Bytes read attributed to resolved DataServer\n";
+        o << "# TYPE readgen_endpoint_bytes_total counter\n";
+        o << "# HELP readgen_endpoint_achieved_rate_bytes Cumulative bytes/wall for this DataServer "
+             "(same definition as readgen_achieved_rate_bytes)\n";
+        o << "# TYPE readgen_endpoint_achieved_rate_bytes gauge\n";
+        o << "# HELP readgen_endpoint_sessions_total Completed FileSessions attributed to resolved "
+             "DataServer (not TCP connections)\n";
+        o << "# TYPE readgen_endpoint_sessions_total counter\n";
+        bool any_ep_errors = false;
+        for (const auto& kv : snap.by_data_server) {
+            if (!kv.second.errors_by_class.empty()) {
+                any_ep_errors = true;
+                break;
+            }
+        }
+        if (any_ep_errors) {
+            o << "# HELP readgen_endpoint_errors_total Hard failures by DataServer and class\n";
+            o << "# TYPE readgen_endpoint_errors_total counter\n";
+        }
+        for (const auto& kv : snap.by_data_server) {
+            const EndpointStats& ep = kv.second;
+            std::ostringstream el;
+            el << L << ",data_server=\"" << EscapeLabel(ep.data_server) << "\"";
+            if (!ep.cms_site.empty()) {
+                el << ",cms_site=\"" << EscapeLabel(ep.cms_site) << "\"";
+            }
+            const std::string EL = el.str();
+            const double ep_rate =
+                snap.wall_s > 0.0 ? static_cast<double>(ep.bytes_read) / snap.wall_s : 0.0;
+            o << "readgen_endpoint_bytes_total{" << EL << "} " << ep.bytes_read << '\n';
+            {
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), "%.9g", ep_rate);
+                o << "readgen_endpoint_achieved_rate_bytes{" << EL << "} " << buf << '\n';
+            }
+            o << "readgen_endpoint_sessions_total{" << EL << ",result=\"ok\"} " << ep.sessions_ok
+              << '\n';
+            o << "readgen_endpoint_sessions_total{" << EL << ",result=\"fail\"} " << ep.sessions_fail
+              << '\n';
+            for (const auto& err : ep.errors_by_class) {
+                o << "readgen_endpoint_errors_total{" << EL << ",class=\"" << EscapeLabel(err.first)
+                  << "\"} " << err.second << '\n';
+            }
+        }
+    }
+
+    if (!snap.by_cms_site.empty()) {
+        o << "# HELP readgen_site_bytes_total Bytes read attributed to CMS site (mapped servers only)\n";
+        o << "# TYPE readgen_site_bytes_total counter\n";
+        o << "# HELP readgen_site_achieved_rate_bytes Cumulative bytes/wall for this CMS site\n";
+        o << "# TYPE readgen_site_achieved_rate_bytes gauge\n";
+        o << "# HELP readgen_site_sessions_total Completed FileSessions attributed to CMS site\n";
+        o << "# TYPE readgen_site_sessions_total counter\n";
+        for (const auto& kv : snap.by_cms_site) {
+            const SiteStats& site = kv.second;
+            const std::string SL =
+                L + ",cms_site=\"" + EscapeLabel(site.cms_site) + "\"";
+            const double site_rate =
+                snap.wall_s > 0.0 ? static_cast<double>(site.bytes_read) / snap.wall_s : 0.0;
+            o << "readgen_site_bytes_total{" << SL << "} " << site.bytes_read << '\n';
+            {
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), "%.9g", site_rate);
+                o << "readgen_site_achieved_rate_bytes{" << SL << "} " << buf << '\n';
+            }
+            o << "readgen_site_sessions_total{" << SL << ",result=\"ok\"} " << site.sessions_ok
+              << '\n';
+            o << "readgen_site_sessions_total{" << SL << ",result=\"fail\"} " << site.sessions_fail
+              << '\n';
+        }
+    }
+
     return o.str();
 }
 

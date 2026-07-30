@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(xrd-readgen
-  VERSION 0.1.0
+  VERSION 0.1.1
   DESCRIPTION "XRootD remote-read traffic generator for CMS / WLCG data challenges"
   LANGUAGES CXX)
 
@@ -47,7 +47,9 @@ set(READGEN_SOURCES
   src/auth_check.cc
   src/probe_command.cc
   src/workload_run_command.cc
-  src/xrdcl_env.cc)
+  src/xrdcl_env.cc
+  src/site_map.cc
+  src/sitename_resolver.cc)
 
 add_executable(xrd-readgen
   src/main.cc
@@ -95,6 +97,8 @@ if(READGEN_ENABLE_TESTS)
     tests/test_auth_check.cc
     tests/test_probe_command.cc
     tests/test_workload_run_command.cc
+    tests/test_site_map.cc
+    tests/test_sitename_resolver.cc
     tests/stub_run_command.cc
     src/units.cc
     src/token_bucket.cc
@@ -110,7 +114,9 @@ if(READGEN_ENABLE_TESTS)
     src/workload_run_command.cc
     src/xrdcl_env.cc
     src/inflight.cc
-    src/file_session.cc)
+    src/file_session.cc
+    src/site_map.cc
+    src/sitename_resolver.cc)
 
   target_include_directories(xrd-readgen-tests PRIVATE include)
   target_compile_options(xrd-readgen-tests PRIVATE -Wall -Wextra)

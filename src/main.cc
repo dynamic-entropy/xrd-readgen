@@ -130,12 +130,19 @@ int main(int argc, char** argv) {
                             "Pushgateway job label (default xrd-readgen)");
     auto* pushgateway_keep_opt = run_cmd->add_flag(
         "--pushgateway-keep", run_cfg.pushgateway_keep, "Do not DELETE Pushgateway group on exit");
+    auto* site_map_opt = run_cmd->add_option(
+        "--site-map", run_cfg.site_map_path,
+        "JSON host→site map (fallback if sitename query misses)");
+    bool no_sitename_query = false;
+    run_cmd->add_flag("--no-sitename-query", no_sitename_query,
+                      "Disable XrdCl query config sitename per DataServer");
     run_cmd->add_flag("--dry-run", run_cfg.dry_run, "Print resolved config; no I/O");
     auto* run_target_opt =
         run_cmd->add_option("--target", run_target, "Workload mode: target name (required if multi-target)");
     auto* run_skip_auth_opt = run_cmd->add_flag(
         "--skip-auth-check", run_skip_auth, "Workload mode: skip x509 proxy preflight (local only)");
     (void)run_workload_opt;
+    (void)site_map_opt;
 
     auto* validate_cmd = app.add_subcommand("validate", "Validate a workload JSON (no XRootD I/O)");
     std::string workload;
@@ -162,6 +169,8 @@ int main(int argc, char** argv) {
     if (read_cmd->parsed()) return readgen::RunReadCommand(read_opts);
 
     if (run_cmd->parsed()) {
+        if (no_sitename_query) run_cfg.sitename_query = false;
+
         const std::vector<CLI::Option*> legacy_config_opts = {
             endpoint_opt,         filelist_opt,         duration_opt,       rate_opt,
             workers_opt,          pattern_opt,          chunk_opt,          vector_chunks_opt,
@@ -182,6 +191,8 @@ int main(int argc, char** argv) {
             wl_opts.target = run_target;
             wl_opts.dry_run = run_cfg.dry_run;
             wl_opts.skip_auth_check = run_skip_auth;
+            wl_opts.site_map_path = run_cfg.site_map_path;
+            wl_opts.sitename_query = run_cfg.sitename_query;
             return readgen::RunWorkloadCommand(wl_opts);
         }
 

@@ -1,5 +1,6 @@
 #include "readgen/workload_spec.hh"
 
+#include "readgen/site_map.hh"
 #include "readgen/units.hh"
 
 #include <openssl/evp.h>
@@ -198,6 +199,7 @@ json WorkloadToCanonicalJson(const WorkloadSpec& wl) {
     sinks["job_id"] = wl.sinks.job_id;
     sinks["pushgateway"] = push;
     sinks["results_dir"] = wl.sinks.results_dir;
+    sinks["site_map"] = wl.sinks.site_map_input;
     sinks["snapshot_interval"] = wl.sinks.snapshot_interval_input;
     sinks["snapshot_interval_s"] = wl.sinks.snapshot_interval_s;
     sinks["write_results"] = wl.sinks.write_results;
@@ -332,7 +334,7 @@ ValidateResult ValidateWorkloadJson(const json& root, const std::string& workloa
             const json& sinks = root["sinks"];
             RejectUnknown(r, sinks,
                           {"results_dir", "snapshot_interval", "job_id", "write_results",
-                           "pushgateway"},
+                           "pushgateway", "site_map"},
                           "sinks");
             OptionalString(r, sinks, "results_dir", "sinks.results_dir", wl.sinks.results_dir);
             if (OptionalString(r, sinks, "snapshot_interval", "sinks.snapshot_interval",
@@ -351,6 +353,16 @@ ValidateResult ValidateWorkloadJson(const json& root, const std::string& workloa
             }
             OptionalString(r, sinks, "job_id", "sinks.job_id", wl.sinks.job_id);
             OptionalBool(r, sinks, "write_results", "sinks.write_results", wl.sinks.write_results);
+            if (OptionalString(r, sinks, "site_map", "sinks.site_map", wl.sinks.site_map_input)) {
+                if (!wl.sinks.site_map_input.empty()) {
+                    wl.sinks.site_map = ResolveRelative(workload_dir, wl.sinks.site_map_input);
+                    try {
+                        (void)SiteMap::LoadFile(wl.sinks.site_map);
+                    } catch (const std::exception& e) {
+                        AddIssue(r, "sinks.site_map", e.what());
+                    }
+                }
+            }
             if (sinks.contains("pushgateway")) {
                 if (!sinks["pushgateway"].is_object()) {
                     AddIssue(r, "sinks.pushgateway", "must be an object");
@@ -569,6 +581,7 @@ RunConfig ToRunConfig(const WorkloadSpec& wl, const TargetSpec& target) {
     cfg.pushgateway_url = wl.sinks.pushgateway.url;
     cfg.pushgateway_job = wl.sinks.pushgateway.job;
     cfg.pushgateway_keep = wl.sinks.pushgateway.keep;
+    cfg.site_map_path = wl.sinks.site_map;
     cfg.schema_version = wl.schema_version;
     cfg.auth_mode = wl.auth.mode;
     return cfg;

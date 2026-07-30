@@ -16,6 +16,8 @@ struct WorkloadRunOptions {
     std::string target;  // empty = ok only when the workload has exactly one target
     bool dry_run = false;
     bool skip_auth_check = false;
+    std::string site_map_path;  // optional CLI override of sinks.site_map
+    bool sitename_query = true;
     WorkloadEngineRunner run_hook;
 };
 
