@@ -73,3 +73,42 @@ TEST_F(FileSinkTest, WritesJsonlAndResult) {
     EXPECT_TRUE(result.contains("readgen_bytes_per_cpu_second"));
     EXPECT_EQ(result["run_info"]["seed"], 42);
 }
+
+TEST_F(FileSinkTest, WritesWorkloadArtifacts) {
+    MetricsRegistry reg;
+    reg.SetLabels("wl1", "j1", "aaa", "root://example/");
+    reg.SetConfigGauges(0, 2);
+    reg.ObserveSessionOk(1024, 1, 0.001, 0.002, 0.01, 1.0);
+
+    RunInfoMeta meta;
+    meta.version = "0.1.0";
+    meta.arch = "test";
+    meta.xrdcl_version = "test";
+    meta.seed = 7;
+    meta.pattern = "sequential";
+    meta.schema_version = 1;
+    meta.auth_mode = "x509";
+    meta.workload_hash = "abc123";
+    meta.workload_resolved_json = "{\"schema_version\":1}\n";
+
+    FileSink sink(dir_.string(), "wl1", meta);
+    sink.Start();
+    auto snap = reg.Snapshot(1.0);
+    sink.WriteResult(snap, 0.0);
+
+    const auto run_dir = dir_ / "wl1";
+    ASSERT_TRUE(fs::exists(run_dir / "workload_resolved.json"));
+    ASSERT_TRUE(fs::exists(run_dir / "workload.hash"));
+    ASSERT_TRUE(fs::exists(run_dir / "result.json"));
+
+    std::ifstream hash_in(run_dir / "workload.hash");
+    std::string hash_line;
+    ASSERT_TRUE(std::getline(hash_in, hash_line));
+    EXPECT_EQ(hash_line, "abc123");
+
+    std::ifstream rf(run_dir / "result.json");
+    auto result = json::parse(rf);
+    EXPECT_EQ(result["workload_hash"], "abc123");
+    EXPECT_EQ(result["run_info"]["schema_version"], 1);
+    EXPECT_EQ(result["run_info"]["auth_mode"], "x509");
+}

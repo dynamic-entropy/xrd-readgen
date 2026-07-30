@@ -283,8 +283,8 @@ ValidateResult ValidateWorkloadJson(const json& root, const std::string& workloa
         if (RequireString(r, auth, "mode", "auth.mode", mode)) {
             if (mode != "x509") {
                 AddIssue(r, "auth.mode",
-                         "unsupported auth mode (only \"x509\" is accepted in v1; "
-                         "token/IAM pending CMS/WLCG decision)");
+                         "unsupported auth mode (only \"x509\" / X509_USER_PROXY in v1; "
+                         "bearer tokens deferred until after Phases 3–6)");
             } else {
                 wl.auth.mode = mode;
             }
@@ -569,6 +569,8 @@ RunConfig ToRunConfig(const WorkloadSpec& wl, const TargetSpec& target) {
     cfg.pushgateway_url = wl.sinks.pushgateway.url;
     cfg.pushgateway_job = wl.sinks.pushgateway.job;
     cfg.pushgateway_keep = wl.sinks.pushgateway.keep;
+    cfg.schema_version = wl.schema_version;
+    cfg.auth_mode = wl.auth.mode;
     return cfg;
 }
 

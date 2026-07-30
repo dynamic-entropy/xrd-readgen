@@ -15,6 +15,10 @@ struct RunInfoMeta {
     std::string xrdcl_version;
     uint64_t seed = 0;
     std::string pattern;
+    int schema_version = 0;              // 0 = legacy CLI / unknown
+    std::string auth_mode;               // e.g. "x509"; empty for legacy CLI
+    std::string workload_hash;           // SHA-256 of canonical resolved JSON
+    std::string workload_resolved_json;  // written as workload_resolved.json when set
 };
 
 // Writes periodic metrics.jsonl snapshots and a final result.json.

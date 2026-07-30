@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <system_error>
 
@@ -70,6 +71,25 @@ void FileSink::Start() {
     if (ec) {
         throw std::runtime_error("cannot create results dir " + run_dir_ + ": " + ec.message());
     }
+    if (!meta_.workload_resolved_json.empty()) {
+        const auto resolved_path = fs::path(run_dir_) / "workload_resolved.json";
+        std::ofstream resolved(resolved_path);
+        if (!resolved) {
+            throw std::runtime_error("cannot write " + resolved_path.string());
+        }
+        resolved << meta_.workload_resolved_json;
+        if (!meta_.workload_resolved_json.empty() && meta_.workload_resolved_json.back() != '\n') {
+            resolved << '\n';
+        }
+    }
+    if (!meta_.workload_hash.empty()) {
+        const auto hash_path = fs::path(run_dir_) / "workload.hash";
+        std::ofstream hash_out(hash_path);
+        if (!hash_out) {
+            throw std::runtime_error("cannot write " + hash_path.string());
+        }
+        hash_out << meta_.workload_hash << '\n';
+    }
     const auto path = fs::path(run_dir_) / "metrics.jsonl";
     jsonl_.open(path, std::ios::out | std::ios::trunc);
     if (!jsonl_) {
@@ -119,6 +139,9 @@ void FileSink::WriteResult(const MetricsSnapshot& snap, double cpu_seconds_at_st
                      {"xrdcl_version", meta_.xrdcl_version},
                      {"seed", meta_.seed},
                      {"pattern", meta_.pattern}};
+    if (meta_.schema_version > 0) j["run_info"]["schema_version"] = meta_.schema_version;
+    if (!meta_.auth_mode.empty()) j["run_info"]["auth_mode"] = meta_.auth_mode;
+    if (!meta_.workload_hash.empty()) j["workload_hash"] = meta_.workload_hash;
 
     const auto path = fs::path(run_dir_) / "result.json";
     std::ofstream out(path);

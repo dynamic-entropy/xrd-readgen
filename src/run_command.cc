@@ -119,6 +119,10 @@ int RunEngine(const RunConfig& cfg) {
         meta.xrdcl_version = XrdVERSION;
         meta.seed = cfg.seed;
         meta.pattern = PatternTypeName(cfg.pattern);
+        meta.schema_version = cfg.schema_version;
+        meta.auth_mode = cfg.auth_mode;
+        meta.workload_hash = cfg.workload_hash;
+        meta.workload_resolved_json = cfg.workload_resolved_json;
         sink = std::make_unique<FileSink>(cfg.results_dir, cfg.run_id, std::move(meta));
         try {
             sink->Start();

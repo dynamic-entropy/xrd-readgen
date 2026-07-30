@@ -46,6 +46,12 @@ struct RunConfig {
     std::string pushgateway_url;
     std::string pushgateway_job = "xrd-readgen";
     bool pushgateway_keep = false;  // if true, skip DELETE on exit (debug / short smoke)
+
+    // Workload reproducibility (empty when launched via legacy CLI flags).
+    int schema_version = 0;
+    std::string auth_mode;               // e.g. "x509"
+    std::string workload_hash;           // SHA-256 of canonical resolved JSON
+    std::string workload_resolved_json;  // canonical JSON text written beside results
 };
 
 const char* PatternTypeName(PatternType t);

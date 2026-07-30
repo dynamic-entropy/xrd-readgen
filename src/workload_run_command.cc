@@ -64,6 +64,8 @@ int RunWorkloadCommand(const WorkloadRunOptions& opts) {
 
     RunConfig cfg = ToRunConfig(wl, *selected);
     cfg.dry_run = opts.dry_run;
+    cfg.workload_hash = validated.workload_hash;
+    cfg.workload_resolved_json = validated.canonical_json;
 
     std::fprintf(stderr, "workload_hash=%s\n", validated.workload_hash.c_str());
 
