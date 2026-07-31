@@ -37,7 +37,9 @@ fs::path MakeWorkloadDir() {
     "name": "t0",
     "endpoint": "root://localhost:10945/",
     "filelist": "files.txt",
-    "pattern": {"type": "sequential"}
+    "target_rate": "10MBps",
+    "workers": 4,
+    "pattern": {"type": "sequential", "read_size": "1MiB", "max_bytes": "auto"}
   }]
 })";
     }

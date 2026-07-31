@@ -73,6 +73,8 @@ void PrintDryRun(const RunConfig& cfg) {
     if (cfg.max_bytes > 0) {
         std::printf("max_bytes:      %s%s\n", FormatBytes(cfg.max_bytes).c_str(),
                     cfg.max_bytes_auto ? " (auto)" : "");
+    } else {
+        std::printf("max_bytes:      (none)\n");
     }
     std::printf("session_timeout:%s\n",
                 cfg.session_timeout_s > 0 ? FormatDuration(cfg.session_timeout_s).c_str() : "off");

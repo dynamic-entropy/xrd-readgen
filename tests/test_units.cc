@@ -1,12 +1,16 @@
 #include "readgen/units.hh"
 
+#include <stdexcept>
+
 #include <gtest/gtest.h>
 
 using readgen::FormatBytes;
 using readgen::FormatRate;
+using readgen::IsUncappedRateToken;
 using readgen::ParseDurationString;
 using readgen::ParseRateString;
 using readgen::ParseSizeString;
+using readgen::ParseTargetRateString;
 
 TEST(Units, Duration) {
     EXPECT_DOUBLE_EQ(ParseDurationString("30"), 30.0);
@@ -31,6 +35,20 @@ TEST(Units, Rate) {
     EXPECT_EQ(ParseRateString("8Mbps"), 1000000u);   // 8e6 bits/s / 8
     EXPECT_EQ(ParseRateString("1Gbps"), 125000000u);
     EXPECT_EQ(ParseRateString("35MBps"), 35000000u);
+}
+
+TEST(Units, TargetRateUncapped) {
+    EXPECT_TRUE(IsUncappedRateToken(""));
+    EXPECT_TRUE(IsUncappedRateToken("uncapped"));
+    EXPECT_TRUE(IsUncappedRateToken("Uncapped"));
+    EXPECT_FALSE(IsUncappedRateToken("0"));
+    EXPECT_FALSE(IsUncappedRateToken("10MBps"));
+    EXPECT_EQ(ParseTargetRateString(""), 0u);
+    EXPECT_EQ(ParseTargetRateString("uncapped"), 0u);
+    EXPECT_EQ(ParseTargetRateString("0"), 0u);
+    EXPECT_EQ(ParseTargetRateString("0MBps"), 0u);
+    EXPECT_EQ(ParseTargetRateString("10MBps"), 10000000u);
+    EXPECT_THROW(ParseTargetRateString("not-a-rate"), std::runtime_error);
 }
 
 TEST(Units, Format) {

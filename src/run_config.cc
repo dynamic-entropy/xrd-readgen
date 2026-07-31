@@ -72,13 +72,16 @@ uint64_t ComputeBucketBurst(const RunConfig& cfg) {
 }
 
 void ResolveRunConfig(RunConfig& cfg) {
-    if (cfg.max_bytes_auto) {
-        if (cfg.target_rate_bps == 0) {
-            cfg.max_bytes_auto = false;
-            cfg.max_bytes = 0;
-        } else {
-            cfg.max_bytes = ComputeAutoMaxBytes(cfg);
+    if (cfg.target_rate_bps == 0) {
+        if (cfg.max_bytes_auto || cfg.max_bytes == 0) {
+            throw std::runtime_error(
+                "uncapped rate requires explicit max_bytes (SIZE > 0); "
+                "'auto' and 0 are not allowed");
         }
+        return;
+    }
+    if (cfg.max_bytes_auto) {
+        cfg.max_bytes = ComputeAutoMaxBytes(cfg);
     }
 }
 

@@ -16,6 +16,11 @@ the overall panel: gauges `readgen_site_achieved_rate_bytes` /
 false-zero when a label is idle. FileSessions panels count completed
 Open→…→Close work items — **not** TCP connections.
 
+**Capacity mode (uncapped):** When `readgen_target_rate_bytes` is 0, the
+Achieved-vs-target panel plots **achieved only** (target series filtered out).
+Configure `workers` / `read_size` / `max_bytes` and read the achieved gauge /
+run summary — see `workloads/example_uncapped.json`.
+
 ## Import (xrdmon)
 
 1. Open Grafana (e.g. `http://xrdmon.cern.ch:3000`).

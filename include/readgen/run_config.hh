@@ -104,8 +104,9 @@ uint64_t EstimateSessionCharge(const RunConfig& cfg, bool use_vector);
 // Token-bucket burst capacity from the rate policy above.
 uint64_t ComputeBucketBurst(const RunConfig& cfg);
 
-// If max_bytes_auto, fill max_bytes from rate/workers. Uncapped rate clears
-// max_bytes_auto.
+// If max_bytes_auto and rate > 0, fill max_bytes from rate/workers.
+// Uncapped (target_rate_bps == 0) requires explicit max_bytes > 0 — throws
+// if max_bytes_auto or max_bytes == 0.
 void ResolveRunConfig(RunConfig& cfg);
 
 // Join endpoint + path into a root:// URL.

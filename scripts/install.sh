@@ -216,6 +216,7 @@ seed_file() {
 share="${PREFIX}/share/xrd-readgen"
 seed_file "${share}/workloads/example.json" "${CONFIG_DIR}/workloads/example.json"
 seed_file "${share}/workloads/example_workload.json" "${CONFIG_DIR}/workloads/example_workload.json"
+seed_file "${share}/workloads/example_uncapped.json" "${CONFIG_DIR}/workloads/example_uncapped.json"
 seed_file "${share}/filelists/local.txt" "${CONFIG_DIR}/filelists/local.txt"
 seed_file "${share}/filelists/remote.txt" "${CONFIG_DIR}/filelists/remote.txt"
 seed_file "${share}/filelists/remote_single.txt" "${CONFIG_DIR}/filelists/remote_single.txt"

@@ -107,6 +107,16 @@ double ParseDurationString(const std::string& s) {
     throw std::runtime_error("unknown duration unit '" + unit + "'");
 }
 
+bool IsUncappedRateToken(const std::string& s) {
+    if (s.empty()) return true;
+    return Lower(s) == "uncapped";
+}
+
+uint64_t ParseTargetRateString(const std::string& s) {
+    if (IsUncappedRateToken(s)) return 0;
+    return ParseRateString(s);
+}
+
 uint64_t ParseRateString(const std::string& s) {
     // Accept: 100MBps, 100MiBps, 1Gbps, 500MB/s, 35Mbps, 1e6 (raw bytes/sec)
     std::string t = s;

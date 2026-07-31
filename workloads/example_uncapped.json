@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "run_id": "local-capacity-smoke",
+  "duration": "30s",
+  "seed": 1,
+  "auth": {
+    "mode": "x509"
+  },
+  "targets": [
+    {
+      "name": "local-dev",
+      "endpoint": "root://localhost:10945/",
+      "filelist": "../filelists/local.txt",
+      "target_rate": "uncapped",
+      "workers": 16,
+      "pattern": {
+        "type": "sequential",
+        "read_size": "1MiB",
+        "file_fraction": 1.0,
+        "max_bytes": "32MiB"
+      }
+    }
+  ],
+  "client_tuning": {
+    "session_timeout": "60s",
+    "connection_window": 15,
+    "connection_retry": 2,
+    "request_timeout": 60
+  },
+  "sinks": {
+    "results_dir": "results",
+    "snapshot_interval": "5s",
+    "write_results": true,
+    "pushgateway": {
+      "url": "",
+      "job": "xrd-readgen",
+      "keep": false
+    }
+  }
+}

@@ -1,6 +1,7 @@
 #include "readgen/run_config.hh"
 
 #include <algorithm>
+#include <stdexcept>
 
 #include <gtest/gtest.h>
 
@@ -43,13 +44,28 @@ TEST(AutoMaxBytes, ResolveSetsMaxBytes) {
     EXPECT_EQ(cfg.max_bytes, ComputeAutoMaxBytes(cfg));
 }
 
-TEST(AutoMaxBytes, UncappedClearsAuto) {
+TEST(AutoMaxBytes, UncappedRejectsAuto) {
     RunConfig cfg;
     cfg.max_bytes_auto = true;
     cfg.target_rate_bps = 0;
+    EXPECT_THROW(ResolveRunConfig(cfg), std::runtime_error);
+}
+
+TEST(AutoMaxBytes, UncappedRejectsZeroMaxBytes) {
+    RunConfig cfg;
+    cfg.max_bytes_auto = false;
+    cfg.max_bytes = 0;
+    cfg.target_rate_bps = 0;
+    EXPECT_THROW(ResolveRunConfig(cfg), std::runtime_error);
+}
+
+TEST(AutoMaxBytes, UncappedKeepsExplicitMaxBytes) {
+    RunConfig cfg;
+    cfg.max_bytes_auto = false;
+    cfg.max_bytes = 32ull << 20;
+    cfg.target_rate_bps = 0;
     ResolveRunConfig(cfg);
-    EXPECT_FALSE(cfg.max_bytes_auto);
-    EXPECT_EQ(cfg.max_bytes, 0u);
+    EXPECT_EQ(cfg.max_bytes, 32ull << 20);
 }
 
 TEST(BucketBurst, CoversWorkerPipeline) {

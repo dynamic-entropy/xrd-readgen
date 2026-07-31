@@ -40,7 +40,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Achieved vs target (bytes/s, Bps\u2192MB/s SI). Achieved is cumulative bytes/wall on the generator steady_clock (same as run summary). Y-axis soft-min 0 so local near-target runs are not auto-zoomed.",
+      "description": "Achieved vs target (bytes/s, Bps\u2192MB/s SI). Achieved is cumulative bytes/wall on the generator steady_clock (same as run summary). Y-axis soft-min 0 so local near-target runs are not auto-zoomed. When uncapped (target_rate=0), the target series is omitted — panel is achieved-only capacity view.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -123,7 +123,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (run_id, target, instance) (readgen_target_rate_bytes{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"})",
+          "expr": "sum by (run_id, target, instance) (readgen_target_rate_bytes{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"}) > 0",
           "legendFormat": "target",
           "refId": "B"
         }
@@ -199,7 +199,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Configured target rate (gauge, bytes/s).",
+      "description": "Configured target rate (gauge, bytes/s). 0 means uncapped capacity mode.",
       "fieldConfig": {
         "defaults": {
           "color": {

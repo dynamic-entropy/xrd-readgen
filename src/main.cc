@@ -83,8 +83,9 @@ int main(int argc, char** argv) {
     auto* filelist_opt =
         run_cmd->add_option("--filelist", filelist_path, "File with one path per line");
     auto* duration_opt = run_cmd->add_option("--duration", duration_str, "Run duration (e.g. 30s, 5m)");
-    auto* rate_opt = run_cmd->add_option("--rate", rate_str,
-                                         "Target rate (prefer MBps/Gbps SI; also MiBps/Mbps); omit to uncap");
+    auto* rate_opt = run_cmd->add_option(
+        "--rate", rate_str,
+        "Target rate (prefer MBps/Gbps SI; also MiBps/Mbps); omit / 0 / uncapped for capacity mode");
     auto* workers_opt =
         run_cmd->add_option("--workers", run_cfg.workers, "Max in-flight sessions (default 16)")
             ->check(CLI::Range(1u, 100000u));
@@ -101,7 +102,8 @@ int main(int argc, char** argv) {
         run_cmd->add_option("--file-fraction", run_cfg.file_fraction, "Fraction of each file to read");
     auto* max_bytes_opt = run_cmd->add_option(
         "--max-bytes", max_bytes_str,
-        "Session byte cap (SIZE, 0=none, or 'auto' from --rate/--workers; default auto)");
+        "Session byte cap (SIZE, or 'auto' from --rate/--workers; required SIZE when uncapped; "
+        "default auto)");
     auto* session_timeout_opt = run_cmd->add_option(
         "--session-timeout", session_timeout_str, "Per-session wall timeout (0 to disable; default 60s)");
     auto* connection_window_opt = run_cmd->add_option(
@@ -212,11 +214,12 @@ int main(int argc, char** argv) {
             run_cfg.chunk_size = static_cast<uint32_t>(readgen::ParseSizeString(chunk_str));
             if (!rate_str.empty()) {
                 run_cfg.target_rate_input = rate_str;
-                run_cfg.target_rate_bps = readgen::ParseRateString(rate_str);
+                run_cfg.target_rate_bps = readgen::ParseTargetRateString(rate_str);
             }
             if (max_bytes_str == "auto") {
                 run_cfg.max_bytes_auto = true;
             } else {
+                run_cfg.max_bytes_auto = false;
                 run_cfg.max_bytes = readgen::ParseSizeString(max_bytes_str);
             }
             run_cfg.pattern = ParsePattern(pattern_str);

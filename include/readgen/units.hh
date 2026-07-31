@@ -14,6 +14,12 @@ double ParseDurationString(const std::string& s);
 //   MBps / MB/s = SI megabytes/sec; Mbps = megabits/sec; MiBps = mebibytes/sec
 uint64_t ParseRateString(const std::string& s);
 
+// True for empty or case-insensitive "uncapped" (capacity mode, no rate hold).
+bool IsUncappedRateToken(const std::string& s);
+
+// Like ParseRateString, but empty / "uncapped" / "0" / "0MBps" → 0 (uncapped).
+uint64_t ParseTargetRateString(const std::string& s);
+
 // Size: "1MB", "1MiB", "512KiB", "1024" → bytes (MB=SI, MiB=binary)
 uint64_t ParseSizeString(const std::string& s);
 

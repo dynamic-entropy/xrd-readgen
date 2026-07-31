@@ -106,6 +106,49 @@ TEST(WorkloadSpec, BadRateString) {
     EXPECT_TRUE(HasField(r, "targets[0].target_rate"));
 }
 
+TEST(WorkloadSpec, ValidUncapped) {
+    const auto r = ValidateWorkloadFile((FixtureDir() / "valid_uncapped.json").string());
+    ASSERT_TRUE(r.ok) << (r.issues.empty() ? "" : r.issues.front().field + ": " +
+                                                     r.issues.front().message);
+    ASSERT_EQ(r.resolved.targets.size(), 1u);
+    EXPECT_EQ(r.resolved.targets[0].target_rate_bps, 0u);
+    EXPECT_EQ(r.resolved.targets[0].pattern.max_bytes, 16ull << 20);
+    EXPECT_FALSE(r.resolved.targets[0].pattern.max_bytes_auto);
+    const auto cfg = ToRunConfig(r.resolved, r.resolved.targets[0]);
+    EXPECT_EQ(cfg.target_rate_bps, 0u);
+    EXPECT_EQ(cfg.max_bytes, 16ull << 20);
+}
+
+TEST(WorkloadSpec, UncappedRateTokens) {
+    for (const char* rate : {"", "0", "0MBps", "uncapped", "Uncapped"}) {
+        json j = json::parse(R"({
+          "schema_version": 1,
+          "run_id": "x",
+          "duration": "30s",
+          "auth": {"mode": "x509"},
+          "targets": [{
+            "name": "t0",
+            "endpoint": "root://localhost:10945/",
+            "filelist": "files.txt",
+            "target_rate": "PLACEHOLDER",
+            "workers": 4,
+            "pattern": {"type": "sequential", "read_size": "1MiB", "max_bytes": "8MiB"}
+          }]
+        })");
+        j["targets"][0]["target_rate"] = rate;
+        const auto r = ValidateWorkloadJson(j, FixtureDir().string());
+        ASSERT_TRUE(r.ok) << rate << ": "
+                          << (r.issues.empty() ? "" : r.issues.front().message);
+        EXPECT_EQ(r.resolved.targets[0].target_rate_bps, 0u) << rate;
+    }
+}
+
+TEST(WorkloadSpec, UncappedRejectsAutoMaxBytes) {
+    const auto r = ValidateWorkloadFile((FixtureDir() / "bad_uncapped_auto.json").string());
+    EXPECT_FALSE(r.ok);
+    EXPECT_TRUE(HasField(r, "targets[0].pattern.max_bytes"));
+}
+
 TEST(WorkloadSpec, MissingFilelist) {
     const auto r = ValidateWorkloadFile((FixtureDir() / "bad_missing_filelist.json").string());
     EXPECT_FALSE(r.ok);
@@ -213,5 +256,9 @@ INSTANTIATE_TEST_SUITE_P(
                       InvalidCase{"endpoint", "bad_endpoint.json", "targets[0].endpoint"},
                       InvalidCase{"auth", "bad_auth_mode.json", "auth.mode"},
                       InvalidCase{"rate", "bad_rate.json", "targets[0].target_rate"},
+                      InvalidCase{"uncapped_auto", "bad_uncapped_auto.json",
+                                  "targets[0].pattern.max_bytes"},
                       InvalidCase{"filelist", "bad_missing_filelist.json", "targets[0].filelist"}),
-    [](const ::testing::TestParamInfo<InvalidCase>& info) { return info.param.name; });
+    [](const ::testing::TestParamInfo<InvalidCase>& info) {
+        return std::string(info.param.name);
+    });

@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "run_id": "x",
+  "duration": "30s",
+  "auth": { "mode": "x509" },
+  "targets": [
+    {
+      "name": "t0",
+      "endpoint": "root://localhost:10945/",
+      "filelist": "files.txt",
+      "target_rate": "uncapped",
+      "workers": 8,
+      "pattern": {
+        "type": "sequential",
+        "read_size": "1MiB",
+        "max_bytes": "auto"
+      }
+    }
+  ]
+}

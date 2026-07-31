@@ -427,15 +427,11 @@ ValidateResult ValidateWorkloadJson(const json& root, const std::string& workloa
                     AddIssue(r, base + ".target_rate", "must be a string");
                 } else {
                     t.target_rate_input = tj["target_rate"].get<std::string>();
-                    if (!t.target_rate_input.empty()) {
-                        try {
-                            t.target_rate_bps = ParseRateString(t.target_rate_input);
-                            if (t.target_rate_bps == 0) {
-                                AddIssue(r, base + ".target_rate", "must be > 0 when set");
-                            }
-                        } catch (const std::exception& e) {
-                            AddIssue(r, base + ".target_rate", e.what());
-                        }
+                    try {
+                        // "" / "uncapped" / "0" / "0MBps" → uncapped (0).
+                        t.target_rate_bps = ParseTargetRateString(t.target_rate_input);
+                    } catch (const std::exception& e) {
+                        AddIssue(r, base + ".target_rate", e.what());
                     }
                 }
             }
@@ -512,11 +508,11 @@ ValidateResult ValidateWorkloadJson(const json& root, const std::string& workloa
                         }
                     }
                 }
-                if (t.pattern.max_bytes_auto && t.target_rate_bps == 0 &&
-                    tj.contains("target_rate") &&
-                    tj["target_rate"].is_string() &&
-                    tj["target_rate"].get<std::string>().empty()) {
-                    // uncapped + auto is fine; ResolveRunConfig clears it
+                if (t.target_rate_bps == 0 &&
+                    (t.pattern.max_bytes_auto || t.pattern.max_bytes == 0)) {
+                    AddIssue(r, base + ".pattern.max_bytes",
+                             "uncapped target_rate requires explicit positive max_bytes "
+                             "(not 'auto' or 0)");
                 }
             }
 
