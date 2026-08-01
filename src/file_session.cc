@@ -1,4 +1,5 @@
 #include "readgen/file_session.hh"
+#include "readgen/random_io.hh"
 
 #include <XrdCl/XrdClFile.hh>
 #include <XrdCl/XrdClXRootDResponses.hh>
@@ -357,10 +358,15 @@ class FileSession : public std::enable_shared_from_this<FileSession> {
 
         if (opts_.max_bytes > 0) budget = std::min(budget, opts_.max_bytes);
 
-        if (opts_.random_offset && file_size_ > 0) {
-            const uint64_t max_start = file_size_ > budget ? file_size_ - budget : 0;
-            std::mt19937_64 rng(opts_.offset_seed);
-            start = std::uniform_int_distribution<uint64_t>(0, max_start)(rng);
+        if (opts_.random_offset) {
+            // Per-op random I/O: budget is the session byte cap; offsets are
+            // sampled independently in IssueNext (not a random-start walk).
+            rng_ = std::mt19937_64(opts_.offset_seed);
+            remaining_ = budget;
+            next_offset_ = 0;
+            IssueNext();
+            ReleaseIfIdle(lock);
+            return;
         }
 
         if (start >= file_size_) {
@@ -397,20 +403,40 @@ class FileSession : public std::enable_shared_from_this<FileSession> {
         if (opts_.vector_chunks > 0) {
             XrdCl::ChunkList chunks;
             char* buf = buffer_.data();
-            uint64_t off = next_offset_;
             uint64_t left = remaining_;
-            for (uint16_t i = 0; i < opts_.vector_chunks && left > 0; ++i) {
-                const uint32_t len = static_cast<uint32_t>(std::min<uint64_t>(opts_.chunk_size, left));
-                chunks.emplace_back(off, len, buf);
-                buf += len;
-                off += len;
-                left -= len;
+            uint64_t requested = 0;
+            if (opts_.random_offset) {
+                for (uint16_t i = 0; i < opts_.vector_chunks && left > 0; ++i) {
+                    const uint32_t len =
+                        static_cast<uint32_t>(std::min<uint64_t>(opts_.chunk_size, left));
+                    const uint64_t off = SampleRandomReadOffset(rng_, file_size_, len);
+                    chunks.emplace_back(off, len, buf);
+                    buf += len;
+                    left -= len;
+                    requested += len;
+                }
+            } else {
+                uint64_t off = next_offset_;
+                for (uint16_t i = 0; i < opts_.vector_chunks && left > 0; ++i) {
+                    const uint32_t len =
+                        static_cast<uint32_t>(std::min<uint64_t>(opts_.chunk_size, left));
+                    chunks.emplace_back(off, len, buf);
+                    buf += len;
+                    off += len;
+                    left -= len;
+                }
+                requested = next_offset_ == off ? 0 : off - next_offset_;
             }
-            requested_ = next_offset_ == off ? 0 : off - next_offset_;
+            requested_ = requested;
             s = file_.VectorRead(chunks, nullptr, &read_handler_);
         } else {
             requested_ = static_cast<uint32_t>(std::min<uint64_t>(opts_.chunk_size, remaining_));
-            s = file_.Read(next_offset_, static_cast<uint32_t>(requested_), buffer_.data(), &read_handler_);
+            if (opts_.random_offset) {
+                next_offset_ = SampleRandomReadOffset(rng_, file_size_,
+                                                       static_cast<uint32_t>(requested_));
+            }
+            s = file_.Read(next_offset_, static_cast<uint32_t>(requested_), buffer_.data(),
+                           &read_handler_);
         }
         if (!s.IsOK()) {
             --pending_cbs_;
@@ -463,7 +489,9 @@ class FileSession : public std::enable_shared_from_this<FileSession> {
         delete resp;
 
         bytes_read_ += got;
-        next_offset_ += got;
+        if (!opts_.random_offset) {
+            next_offset_ += got;
+        }
         remaining_ = got < requested_ ? 0 : remaining_ - got;
         IssueNext();
         ReleaseIfIdle(lock);
@@ -520,6 +548,7 @@ class FileSession : public std::enable_shared_from_this<FileSession> {
     uint64_t bytes_read_ = 0;
     uint64_t ops_ = 0;
     size_t hops_ = 0;
+    std::mt19937_64 rng_{};
 
     double lat_sum_ms_ = 0.0;
     double lat_min_ms_ = std::numeric_limits<double>::max();

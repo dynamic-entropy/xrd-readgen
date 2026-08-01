@@ -93,6 +93,7 @@ if(READGEN_ENABLE_TESTS)
     tests/test_file_sink.cc
     tests/test_prom_encode.cc
     tests/test_soft_fault.cc
+    tests/test_random_io.cc
     tests/test_workload_spec.cc
     tests/test_auth_check.cc
     tests/test_probe_command.cc

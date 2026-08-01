@@ -14,7 +14,7 @@ struct FileSessionOptions {
     uint64_t offset = 0;            // starting offset (ignored if random_offset)
     uint64_t max_bytes = 0;         // 0 = no hard byte cap (read whole file)
     uint16_t vector_chunks = 0;     // >0: issue VectorReads of N chunks per op
-    bool random_offset = false;     // pick start offset after Stat (seeded)
+    bool random_offset = false;     // per-op random offsets (seeded)
     uint64_t offset_seed = 0;       // RNG seed for random_offset
     // Soft wall clock for the whole session (0 = disabled). A shared deadline
     // watchdog aborts via Close so a dead reconnect cannot pin a worker for minutes.
