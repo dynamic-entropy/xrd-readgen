@@ -72,7 +72,7 @@ struct MetricsSnapshot {
     uint64_t sessions_fail = 0;
     uint64_t read_ops_total = 0;
     double target_rate_bytes = 0.0;
-    // Cumulative achieved rate (bytes / wall_s). Matches run-summary MB/s.
+    // Cumulative achieved rate (bytes / wall_s). Run summary prints bits/s.
     double achieved_rate_bytes = 0.0;
 
     HistogramSnapshot open_seconds;
@@ -119,7 +119,7 @@ ProcessSample SampleProcess();
 class MetricsRegistry {
 public:
     void SetLabels(std::string run_id, std::string job_id, std::string target, std::string endpoint);
-    void SetConfigGauges(uint64_t target_rate_bps, uint32_t max_inflight);
+    void SetConfigGauges(uint64_t target_rate_bytes_per_s, uint32_t max_inflight);
 
     // Optional CMS site map for clean hostname→site attribution. Not owned.
     void SetSiteMap(const SiteMap* map);

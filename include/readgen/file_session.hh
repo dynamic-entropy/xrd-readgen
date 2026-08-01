@@ -44,7 +44,7 @@ struct FileSessionResult {
     uint64_t bytes_read = 0;
     uint64_t ops = 0;
     bool vector = false;
-    double throughput_mb_s = 0.0;  // SI MB/s (bytes/s / 1e6)
+    double throughput_Mbps = 0.0;  // SI megabits/sec (bytes/s × 8 / 1e6)
 
     double op_lat_min_ms = 0.0;
     double op_lat_avg_ms = 0.0;

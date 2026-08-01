@@ -38,7 +38,7 @@ fs::path MakeWorkloadDir(bool multi_target = false) {
       "name": "t0",
       "endpoint": "root://localhost:10945/",
       "filelist": "files.txt",
-      "target_rate": "10MBps",
+      "target_rate": "80Mbps",
       "max_inflight": 4,
       "pattern": {"type": "sequential", "read_size": "1MiB", "max_bytes": "auto"}
     },
@@ -46,7 +46,7 @@ fs::path MakeWorkloadDir(bool multi_target = false) {
       "name": "t1",
       "endpoint": "root://localhost:10946/",
       "filelist": "files.txt",
-      "target_rate": "20MBps",
+      "target_rate": "160Mbps",
       "max_inflight": 8,
       "pattern": {"type": "random"}
     }
@@ -76,7 +76,7 @@ fs::path MakeWorkloadDir(bool multi_target = false) {
     "name": "t0",
     "endpoint": "root://localhost:10945/",
     "filelist": "files.txt",
-    "target_rate": "10MBps",
+    "target_rate": "80Mbps",
     "max_inflight": 4,
     "pattern": {"type": "sequential", "read_size": "1MiB", "max_bytes": "auto"}
   }],
@@ -150,7 +150,7 @@ TEST(WorkloadRunCommand, SingleTargetMapsConfig) {
     EXPECT_EQ(seen.target, "t0");
     EXPECT_EQ(seen.endpoint, "root://localhost:10945/");
     EXPECT_EQ(seen.max_inflight, 4u);
-    EXPECT_EQ(seen.target_rate_bps, 10000000u);
+    EXPECT_EQ(seen.target_rate_bytes_per_s, 10000000u);
     EXPECT_EQ(seen.seed, 7u);
     EXPECT_TRUE(seen.max_bytes_auto);
     EXPECT_EQ(seen.files.size(), 2u);

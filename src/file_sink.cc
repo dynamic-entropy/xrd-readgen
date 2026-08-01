@@ -129,7 +129,7 @@ void FileSink::WriteSnapshot(const MetricsSnapshot& snap) {
 
 void FileSink::WriteResult(const MetricsSnapshot& snap, double cpu_seconds_at_start) {
     const double elapsed = snap.wall_s;
-    const double achieved_bps =
+    const double achieved_bytes_per_s =
         elapsed > 0.0 ? static_cast<double>(snap.bytes_read_total) / elapsed : 0.0;
     const double cpu_delta = snap.cpu_seconds_total - cpu_seconds_at_start;
     const double bytes_per_cpu =
@@ -141,8 +141,11 @@ void FileSink::WriteResult(const MetricsSnapshot& snap, double cpu_seconds_at_st
     j["target"] = snap.target;
     j["endpoint"] = snap.endpoint;
     j["elapsed_s"] = elapsed;
-    j["target_rate_bps"] = snap.target_rate_bytes;
-    j["achieved_bps"] = achieved_bps;
+    // Honest units: bytes/s is the internal/Prom unit; bits/s for operator reports.
+    j["target_rate_bytes_per_s"] = snap.target_rate_bytes;
+    j["achieved_bytes_per_s"] = achieved_bytes_per_s;
+    j["target_rate_bits_per_s"] = snap.target_rate_bytes * 8.0;
+    j["achieved_bits_per_s"] = achieved_bytes_per_s * 8.0;
     j["bytes_read"] = snap.bytes_read_total;
     j["sessions_ok"] = snap.sessions_ok;
     j["sessions_fail"] = snap.sessions_fail;

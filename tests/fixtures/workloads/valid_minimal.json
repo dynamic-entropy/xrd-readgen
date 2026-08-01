@@ -11,7 +11,7 @@
       "name": "t0",
       "endpoint": "root://localhost:10945/",
       "filelist": "files.txt",
-      "target_rate": "10MBps",
+      "target_rate": "80Mbps",
       "pattern": {
         "type": "sequential",
         "read_size": "1MiB",

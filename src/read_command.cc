@@ -1,6 +1,7 @@
 #include "readgen/read_command.hh"
 
 #include "readgen/file_session.hh"
+#include "readgen/units.hh"
 
 #include <cinttypes>
 #include <cstdio>
@@ -16,11 +17,11 @@ void PrintResult(const FileSessionResult& r, bool json) {
             "{\"url\":\"%s\",\"data_server\":\"%s\",\"file_size\":%" PRIu64
             ",\"open_hosts\":%zu,\"open_ms\":%.3f,\"ttfb_ms\":%.3f"
             ",\"bytes_read\":%" PRIu64 ",\"ops\":%" PRIu64
-            ",\"op\":\"%s\",\"read_s\":%.3f,\"throughput_mb_s\":%.2f"
+            ",\"op\":\"%s\",\"read_s\":%.3f,\"throughput_Mbps\":%.2f"
             ",\"op_latency_ms\":{\"min\":%.3f,\"avg\":%.3f,\"max\":%.3f}"
             ",\"close_ms\":%.3f,\"total_s\":%.3f}\n",
             r.url.c_str(), r.data_server.c_str(), r.file_size, r.open_hosts, r.open_ms, r.ttfb_ms, r.bytes_read, r.ops,
-            op, r.read_s, r.throughput_mb_s, r.op_lat_min_ms, r.op_lat_avg_ms, r.op_lat_max_ms, r.close_ms, r.total_s);
+            op, r.read_s, r.throughput_Mbps, r.op_lat_min_ms, r.op_lat_avg_ms, r.op_lat_max_ms, r.close_ms, r.total_s);
         return;
     }
 
@@ -33,7 +34,9 @@ void PrintResult(const FileSessionResult& r, bool json) {
     std::printf("Read:         %" PRIu64 " bytes in %" PRIu64 " %s op%s (%.3f s)\n", r.bytes_read, r.ops, op,
                 r.ops == 1 ? "" : "s", r.read_s);
     std::printf("Op latency:   min %.3f / avg %.3f / max %.3f ms\n", r.op_lat_min_ms, r.op_lat_avg_ms, r.op_lat_max_ms);
-    std::printf("Throughput:   %.2f MB/s\n", r.throughput_mb_s);
+    const uint64_t bytes_per_sec =
+        r.read_s > 0.0 ? static_cast<uint64_t>(r.bytes_read / r.read_s + 0.5) : 0;
+    std::printf("Throughput:   %s\n", FormatRate(bytes_per_sec).c_str());
     std::printf("Close:        %.3f ms\n", r.close_ms);
     std::printf("Total:        %.3f s\n", r.total_s);
 }

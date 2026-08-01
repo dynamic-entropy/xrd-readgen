@@ -21,19 +21,19 @@ const char* PatternTypeName(PatternType t) {
 }
 
 uint64_t ComputeAutoMaxBytes(const RunConfig& cfg) {
-    if (cfg.target_rate_bps == 0) {
+    if (cfg.target_rate_bytes_per_s == 0) {
         throw std::runtime_error("--max-bytes auto requires --rate");
     }
     const uint32_t w = std::max(cfg.max_inflight, 1u);
     const uint64_t chunk = std::max<uint64_t>(cfg.chunk_size, 1);
 
-    uint64_t bytes = static_cast<uint64_t>((static_cast<double>(cfg.target_rate_bps) /
+    uint64_t bytes = static_cast<uint64_t>((static_cast<double>(cfg.target_rate_bytes_per_s) /
                                             static_cast<double>(w)) *
                                            kAutoMaxAmortizeSec);
 
     const uint64_t floor_b = chunk * kAutoMaxFloorChunks;
     const uint64_t aggregate_cap =
-        static_cast<uint64_t>(static_cast<double>(cfg.target_rate_bps) * kRateHeadroomSec);
+        static_cast<uint64_t>(static_cast<double>(cfg.target_rate_bytes_per_s) * kRateHeadroomSec);
     const uint64_t ceil_b = std::min(aggregate_cap, kAutoMaxHardCapBytes);
     bytes = std::max(bytes, floor_b);
     bytes = std::min(bytes, ceil_b);
@@ -58,18 +58,18 @@ uint64_t EstimateSessionCharge(const RunConfig& cfg, bool use_vector) {
 }
 
 uint64_t ComputeBucketBurst(const RunConfig& cfg) {
-    if (cfg.target_rate_bps == 0) return 0;
+    if (cfg.target_rate_bytes_per_s == 0) return 0;
     const bool may_vector =
         cfg.pattern == PatternType::Vector || cfg.pattern == PatternType::Mixed;
     const uint64_t charge = EstimateSessionCharge(cfg, may_vector);
     const uint64_t pipeline = charge * std::max(cfg.max_inflight, 1u);
     const uint64_t headroom =
-        static_cast<uint64_t>(static_cast<double>(cfg.target_rate_bps) * kRateHeadroomSec);
+        static_cast<uint64_t>(static_cast<double>(cfg.target_rate_bytes_per_s) * kRateHeadroomSec);
     return std::max({pipeline, headroom, charge});
 }
 
 void ResolveRunConfig(RunConfig& cfg) {
-    if (cfg.target_rate_bps == 0) {
+    if (cfg.target_rate_bytes_per_s == 0) {
         if (cfg.max_bytes_auto || cfg.max_bytes == 0) {
             throw std::runtime_error(
                 "uncapped rate requires explicit max_bytes (SIZE > 0); "

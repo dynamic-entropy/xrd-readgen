@@ -180,7 +180,7 @@ json TargetToJson(const TargetSpec& t) {
     j["name"] = t.name;
     j["pattern"] = PatternToJson(t.pattern);
     j["target_rate"] = t.target_rate_input;
-    j["target_rate_bps"] = t.target_rate_bps;
+    j["target_rate_bytes_per_s"] = t.target_rate_bytes_per_s;
     j["max_inflight"] = t.max_inflight;
     return j;
 }
@@ -427,8 +427,8 @@ ValidateResult ValidateWorkloadJson(const json& root, const std::string& workloa
                 } else {
                     t.target_rate_input = tj["target_rate"].get<std::string>();
                     try {
-                        // "" / "uncapped" / "0" / "0MBps" → uncapped (0).
-                        t.target_rate_bps = ParseTargetRateString(t.target_rate_input);
+                        // "" / "uncapped" / "0" / "0Mbps" → uncapped (0).
+                        t.target_rate_bytes_per_s = ParseTargetRateString(t.target_rate_input);
                     } catch (const std::exception& e) {
                         AddIssue(r, base + ".target_rate", e.what());
                     }
@@ -505,7 +505,7 @@ ValidateResult ValidateWorkloadJson(const json& root, const std::string& workloa
                         }
                     }
                 }
-                if (t.target_rate_bps == 0 &&
+                if (t.target_rate_bytes_per_s == 0 &&
                     (t.pattern.max_bytes_auto || t.pattern.max_bytes == 0)) {
                     AddIssue(r, base + ".pattern.max_bytes",
                              "uncapped target_rate requires explicit positive max_bytes "
@@ -551,7 +551,7 @@ RunConfig ToRunConfig(const WorkloadSpec& wl, const TargetSpec& target) {
     cfg.endpoint = target.endpoint;
     cfg.files = target.files;
     cfg.filelist_path = target.filelist;
-    cfg.target_rate_bps = target.target_rate_bps;
+    cfg.target_rate_bytes_per_s = target.target_rate_bytes_per_s;
     cfg.target_rate_input = target.target_rate_input;
     cfg.max_inflight = target.max_inflight;
     cfg.pattern = target.pattern.type;

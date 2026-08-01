@@ -85,7 +85,7 @@ int main(int argc, char** argv) {
     auto* duration_opt = run_cmd->add_option("--duration", duration_str, "Run duration (e.g. 30s, 5m)");
     auto* rate_opt = run_cmd->add_option(
         "--rate", rate_str,
-        "Target rate (prefer MBps/Gbps SI; also MiBps/Mbps); omit / 0 / uncapped for capacity mode");
+        "Target rate in SI bits (Mbps/Gbps/bps); omit / 0 / uncapped for capacity mode");
     auto* max_inflight_opt =
         run_cmd->add_option("--max-inflight", run_cfg.max_inflight, "Max in-flight sessions (default 16)")
             ->check(CLI::Range(1u, 100000u));
@@ -212,7 +212,7 @@ int main(int argc, char** argv) {
             run_cfg.chunk_size = static_cast<uint32_t>(readgen::ParseSizeString(chunk_str));
             if (!rate_str.empty()) {
                 run_cfg.target_rate_input = rate_str;
-                run_cfg.target_rate_bps = readgen::ParseTargetRateString(rate_str);
+                run_cfg.target_rate_bytes_per_s = readgen::ParseTargetRateString(rate_str);
             }
             if (max_bytes_str == "auto") {
                 run_cfg.max_bytes_auto = true;

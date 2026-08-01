@@ -53,7 +53,7 @@ TEST(WorkloadSpec, ValidMinimalStableHash) {
     EXPECT_EQ(a.resolved.seed, 42u);
     ASSERT_EQ(a.resolved.targets.size(), 1u);
     EXPECT_EQ(a.resolved.targets[0].files.size(), 1u);
-    EXPECT_EQ(a.resolved.targets[0].target_rate_bps, 10000000u);
+    EXPECT_EQ(a.resolved.targets[0].target_rate_bytes_per_s, 10000000u);
 }
 
 TEST(WorkloadSpec, RelativeFilelistIgnoresCwd) {
@@ -111,16 +111,16 @@ TEST(WorkloadSpec, ValidUncapped) {
     ASSERT_TRUE(r.ok) << (r.issues.empty() ? "" : r.issues.front().field + ": " +
                                                      r.issues.front().message);
     ASSERT_EQ(r.resolved.targets.size(), 1u);
-    EXPECT_EQ(r.resolved.targets[0].target_rate_bps, 0u);
+    EXPECT_EQ(r.resolved.targets[0].target_rate_bytes_per_s, 0u);
     EXPECT_EQ(r.resolved.targets[0].pattern.max_bytes, 16ull << 20);
     EXPECT_FALSE(r.resolved.targets[0].pattern.max_bytes_auto);
     const auto cfg = ToRunConfig(r.resolved, r.resolved.targets[0]);
-    EXPECT_EQ(cfg.target_rate_bps, 0u);
+    EXPECT_EQ(cfg.target_rate_bytes_per_s, 0u);
     EXPECT_EQ(cfg.max_bytes, 16ull << 20);
 }
 
 TEST(WorkloadSpec, UncappedRateTokens) {
-    for (const char* rate : {"", "0", "0MBps", "uncapped", "Uncapped"}) {
+    for (const char* rate : {"", "0", "0Mbps", "uncapped", "Uncapped"}) {
         json j = json::parse(R"({
           "schema_version": 1,
           "run_id": "x",
@@ -139,7 +139,7 @@ TEST(WorkloadSpec, UncappedRateTokens) {
         const auto r = ValidateWorkloadJson(j, FixtureDir().string());
         ASSERT_TRUE(r.ok) << rate << ": "
                           << (r.issues.empty() ? "" : r.issues.front().message);
-        EXPECT_EQ(r.resolved.targets[0].target_rate_bps, 0u) << rate;
+        EXPECT_EQ(r.resolved.targets[0].target_rate_bytes_per_s, 0u) << rate;
     }
 }
 
@@ -199,7 +199,7 @@ TEST(WorkloadSpec, RejectsUnknownFileFractionKey) {
         "name": "t0",
         "endpoint": "root://localhost:10945/",
         "filelist": "files.txt",
-        "target_rate": "10MBps",
+        "target_rate": "80Mbps",
         "max_inflight": 4,
         "pattern": {"type": "sequential", "file_fraction": 0.5}
       }]
@@ -218,7 +218,7 @@ TEST(WorkloadSpec, ToRunConfigMapsFields) {
     EXPECT_EQ(cfg.target, "t0");
     EXPECT_EQ(cfg.endpoint, "root://localhost:10945/");
     EXPECT_EQ(cfg.max_inflight, 4u);
-    EXPECT_EQ(cfg.target_rate_bps, 10000000u);
+    EXPECT_EQ(cfg.target_rate_bytes_per_s, 10000000u);
     EXPECT_EQ(cfg.seed, 42u);
     EXPECT_TRUE(cfg.max_bytes_auto);
     EXPECT_FALSE(cfg.files.empty());

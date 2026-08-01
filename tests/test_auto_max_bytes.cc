@@ -12,7 +12,7 @@ using readgen::RunConfig;
 
 TEST(AutoMaxBytes, ScalesWithMaxInflight) {
     RunConfig cfg;
-    cfg.target_rate_bps = 50ull << 20;  // 50 MiB/s
+    cfg.target_rate_bytes_per_s = 50ull << 20;  // 50 MiB/s
     cfg.chunk_size = 1 << 20;
     cfg.max_inflight = 8;
     const uint64_t a = ComputeAutoMaxBytes(cfg);
@@ -21,13 +21,13 @@ TEST(AutoMaxBytes, ScalesWithMaxInflight) {
     EXPECT_GT(a, b);
     EXPECT_GE(a, static_cast<uint64_t>(cfg.chunk_size) * readgen::kAutoMaxFloorChunks);
     const uint64_t aggregate_cap = static_cast<uint64_t>(
-        static_cast<double>(cfg.target_rate_bps) * readgen::kRateHeadroomSec);
+        static_cast<double>(cfg.target_rate_bytes_per_s) * readgen::kRateHeadroomSec);
     EXPECT_LE(a, std::min(aggregate_cap, readgen::kAutoMaxHardCapBytes));
 }
 
 TEST(AutoMaxBytes, RespectsHardCap) {
     RunConfig cfg;
-    cfg.target_rate_bps = 500ull * 1000 * 1000;  // 500 MB/s SI
+    cfg.target_rate_bytes_per_s = 500ull * 1000 * 1000;  // 500 MB/s SI
     cfg.chunk_size = 1 << 20;
     cfg.max_inflight = 1;  // amortize would be huge without the hard cap
     EXPECT_LE(ComputeAutoMaxBytes(cfg), readgen::kAutoMaxHardCapBytes);
@@ -35,7 +35,7 @@ TEST(AutoMaxBytes, RespectsHardCap) {
 
 TEST(AutoMaxBytes, ResolveSetsMaxBytes) {
     RunConfig cfg;
-    cfg.target_rate_bps = 50ull << 20;
+    cfg.target_rate_bytes_per_s = 50ull << 20;
     cfg.chunk_size = 1 << 20;
     cfg.max_inflight = 16;
     cfg.max_bytes_auto = true;
@@ -47,7 +47,7 @@ TEST(AutoMaxBytes, ResolveSetsMaxBytes) {
 TEST(AutoMaxBytes, UncappedRejectsAuto) {
     RunConfig cfg;
     cfg.max_bytes_auto = true;
-    cfg.target_rate_bps = 0;
+    cfg.target_rate_bytes_per_s = 0;
     EXPECT_THROW(ResolveRunConfig(cfg), std::runtime_error);
 }
 
@@ -55,7 +55,7 @@ TEST(AutoMaxBytes, UncappedRejectsZeroMaxBytes) {
     RunConfig cfg;
     cfg.max_bytes_auto = false;
     cfg.max_bytes = 0;
-    cfg.target_rate_bps = 0;
+    cfg.target_rate_bytes_per_s = 0;
     EXPECT_THROW(ResolveRunConfig(cfg), std::runtime_error);
 }
 
@@ -63,19 +63,19 @@ TEST(AutoMaxBytes, UncappedKeepsExplicitMaxBytes) {
     RunConfig cfg;
     cfg.max_bytes_auto = false;
     cfg.max_bytes = 32ull << 20;
-    cfg.target_rate_bps = 0;
+    cfg.target_rate_bytes_per_s = 0;
     ResolveRunConfig(cfg);
     EXPECT_EQ(cfg.max_bytes, 32ull << 20);
 }
 
 TEST(BucketBurst, CoversMaxInflightPipeline) {
     RunConfig cfg;
-    cfg.target_rate_bps = 10ull << 20;
+    cfg.target_rate_bytes_per_s = 10ull << 20;
     cfg.max_inflight = 4;
     cfg.max_bytes = 20ull << 20;
     cfg.chunk_size = 1 << 20;
     const uint64_t burst = ComputeBucketBurst(cfg);
     EXPECT_GE(burst, cfg.max_bytes * cfg.max_inflight);
-    EXPECT_GE(burst, static_cast<uint64_t>(static_cast<double>(cfg.target_rate_bps) *
+    EXPECT_GE(burst, static_cast<uint64_t>(static_cast<double>(cfg.target_rate_bytes_per_s) *
                                            readgen::kRateHeadroomSec));
 }

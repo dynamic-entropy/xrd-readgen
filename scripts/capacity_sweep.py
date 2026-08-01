@@ -30,7 +30,7 @@ multi_run = _load_multi_run()
 
 
 def endpoint_slug(endpoint: str) -> str:
-    """Short tag for run_prefix / run_id (e.g. fnal, eoscms, ral)."""
+    """Short tag for study_id default (e.g. fnal, eoscms, ral)."""
     host = urlparse(endpoint).hostname or endpoint
     host = host.lower()
     if "fnal" in host:
@@ -64,9 +64,9 @@ def parse_int_list(s: str) -> List[int]:
 def cell_to_row(cell: Dict[str, Any]) -> Dict[str, Any]:
     per = cell.get("processes") or []
     mbps_list = [
-        p["achieved_MBps"]
+        p["achieved_Mbps"]
         for p in per
-        if isinstance(p.get("achieved_MBps"), (int, float))
+        if isinstance(p.get("achieved_Mbps"), (int, float))
     ]
     errs = cell.get("errors") or {}
     timeout = int(errs.get("timeout", 0)) if isinstance(errs, dict) else 0
@@ -78,13 +78,13 @@ def cell_to_row(cell: Dict[str, Any]) -> Dict[str, Any]:
         "max_inflight": cell.get("max_inflight", ""),
         "total_session_cap": cell.get("total_session_cap", ""),
         "endpoint": cell.get("endpoint", ""),
-        "fleet_achieved_MBps": (
-            f"{cell['fleet_achieved_MBps']:.2f}"
-            if isinstance(cell.get("fleet_achieved_MBps"), (int, float))
+        "fleet_achieved_Mbps": (
+            f"{cell['fleet_achieved_Mbps']:.2f}"
+            if isinstance(cell.get("fleet_achieved_Mbps"), (int, float))
             else ""
         ),
-        "per_proc_min_MBps": f"{min(mbps_list):.2f}" if mbps_list else "",
-        "per_proc_max_MBps": f"{max(mbps_list):.2f}" if mbps_list else "",
+        "per_proc_min_Mbps": f"{min(mbps_list):.2f}" if mbps_list else "",
+        "per_proc_max_Mbps": f"{max(mbps_list):.2f}" if mbps_list else "",
         "sessions_ok": cell.get("sessions_ok", ""),
         "sessions_fail": cell.get("sessions_fail", ""),
         "fail_rate": (
@@ -112,9 +112,9 @@ CSV_COLUMNS = [
     "max_inflight",
     "total_session_cap",
     "endpoint",
-    "fleet_achieved_MBps",
-    "per_proc_min_MBps",
-    "per_proc_max_MBps",
+    "fleet_achieved_Mbps",
+    "per_proc_min_Mbps",
+    "per_proc_max_Mbps",
     "sessions_ok",
     "sessions_fail",
     "fail_rate",
@@ -160,13 +160,13 @@ def write_summary(out_dir: Path, cells: Sequence[Dict[str, Any]], knobs: Dict[st
         "",
         "## Results",
         "",
-        "| axis | cell | run_id | N | mi | fleet MB/s | ok/fail | fail_rate | timeouts | exit |",
+        "| axis | cell | run_id | N | mi | fleet Mbps | ok/fail | fail_rate | timeouts | exit |",
         "|---|---|---|---:|---:|---:|---|---:|---:|---:|",
     ]
     for r in rows:
         lines.append(
             f"| {r['axis']} | {r['cell']} | `{r['run_id']}` | {r['n_procs']} | "
-            f"{r['max_inflight']} | {r['fleet_achieved_MBps']} | "
+            f"{r['max_inflight']} | {r['fleet_achieved_Mbps']} | "
             f"{r['sessions_ok']}/{r['sessions_fail']} | {r['fail_rate']} | "
             f"{r['timeouts']} | {r['exit']} |"
         )
@@ -219,7 +219,10 @@ def cmd_run(args: argparse.Namespace) -> int:
     ]
 
     plan = [("A", n, mi) for n, mi in axis_a] + [("B", n, mi) for n, mi in axis_b]
+    # One stable Grafana run_id for the whole study (reuse forever on D1).
+    run_id = (args.run_id or study).strip() or study
     print(f"==> capacity_sweep: {len(plan)} cells → {out_dir}")
+    print(f"    run_id: {run_id}  (stable across cells; settle={args.settle_s}s)")
     for axis, n, mi in plan:
         print(f"    {axis}: N={n} max_inflight={mi}")
 
@@ -231,13 +234,16 @@ def cmd_run(args: argparse.Namespace) -> int:
         "max_bytes": args.max_bytes,
         "duration": args.duration,
         "study_id": study,
+        "run_id": run_id,
+        "settle_s": args.settle_s,
     }
 
-    for axis, n, mi in plan:
+    for idx, (axis, n, mi) in enumerate(plan):
         cell_name = f"{axis}-n{n}-mi{mi}"
-        prefix = f"{study}-{slug}"
+        # Per-cell FileSink root so stable run_id does not overwrite archives.
+        cell_results = Path(args.results_dir) / study / cell_name
         utc_start = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        print(f"\n==> cell {cell_name}  prefix={prefix}")
+        print(f"\n==> cell {cell_name}  run_id={run_id}  results={cell_results}")
         summary = multi_run.run_fleet(
             n=n,
             endpoint=args.endpoint,
@@ -248,8 +254,8 @@ def cmd_run(args: argparse.Namespace) -> int:
             chunk_size=args.chunk_size,
             pushgateway=args.pushgateway,
             pushgateway_job=args.pushgateway_job,
-            results_dir=args.results_dir,
-            run_prefix=prefix,
+            results_dir=str(cell_results),
+            run_id=run_id,
             binary=args.binary,
             session_timeout=args.session_timeout,
             connection_window=args.connection_window,
@@ -257,11 +263,13 @@ def cmd_run(args: argparse.Namespace) -> int:
             no_sitename=args.no_sitename_query,
             skip_auth_check=args.skip_auth_check,
             print_summary=True,
+            pushgateway_keep=not args.pushgateway_delete,
         )
         cell = dict(summary)
         cell["axis"] = axis
         cell["cell"] = cell_name
         cell["study_id"] = study
+        cell["run_id"] = run_id
         cell["utc_start"] = utc_start
         cell_dir = out_dir / cell_name
         cell_dir.mkdir(parents=True, exist_ok=True)
@@ -277,6 +285,10 @@ def cmd_run(args: argparse.Namespace) -> int:
                 print(f"error: cell {cell_name} exit {cell['exit']}; aborting", file=sys.stderr)
                 write_summary(out_dir, cells, knobs)
                 return int(cell["exit"])
+        # Let the previous fleet die out (idle zeros scraped) before the next cell.
+        if idx + 1 < len(plan) and args.settle_s > 0 and not args.dry_run:
+            print(f"==> settle {args.settle_s}s before next cell (run_id={run_id})")
+            time.sleep(args.settle_s)
 
     write_summary(out_dir, cells, knobs)
     return 0
@@ -296,7 +308,27 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--pushgateway-job", default="xrd-readgen")
     run.add_argument("--results-dir", default="/var/lib/xrd-readgen/results")
     run.add_argument("--out-dir", required=True, help="Study output (summary + cell.json)")
-    run.add_argument("--study-id", default="", help="Prefix tag (default: {slug}-cap)")
+    run.add_argument(
+        "--study-id",
+        default="",
+        help="Study tag / default run_id (default: {slug}-cap)",
+    )
+    run.add_argument(
+        "--run-id",
+        default="",
+        help="Stable Grafana run_id for every cell (default: --study-id). Reuse forever.",
+    )
+    run.add_argument(
+        "--settle-s",
+        type=int,
+        default=45,
+        help="Seconds to wait between cells so the previous fleet dies out (default: 45)",
+    )
+    run.add_argument(
+        "--pushgateway-delete",
+        action="store_true",
+        help="DELETE Pushgateway groups on exit (default: keep idle zero-rate gauges)",
+    )
     run.add_argument(
         "--n-list",
         type=parse_int_list,

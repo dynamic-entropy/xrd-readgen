@@ -110,8 +110,8 @@ void MetricsRegistry::SetLabels(std::string run_id, std::string job_id, std::str
     endpoint_ = std::move(endpoint);
 }
 
-void MetricsRegistry::SetConfigGauges(uint64_t target_rate_bps, uint32_t max_inflight) {
-    target_rate_bytes_.store(target_rate_bps, std::memory_order_relaxed);
+void MetricsRegistry::SetConfigGauges(uint64_t target_rate_bytes_per_s, uint32_t max_inflight) {
+    target_rate_bytes_.store(target_rate_bytes_per_s, std::memory_order_relaxed);
     max_inflight_.store(max_inflight, std::memory_order_relaxed);
 }
 

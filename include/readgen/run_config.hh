@@ -15,7 +15,7 @@ struct RunConfig {
     std::string endpoint;  // e.g. root://localhost:10945/
     std::vector<std::string> files;  // paths relative to endpoint (or absolute LFNs)
     std::string filelist_path;       // source path (for dry-run display)
-    uint64_t target_rate_bps = 0;    // 0 = uncapped
+    uint64_t target_rate_bytes_per_s = 0;  // bytes/sec hold; 0 = uncapped (from Mbps/Gbps input)
     std::string target_rate_input;   // original --rate string (for operator echo)
     uint32_t max_inflight = 16;           // max concurrent FileSessions (outstanding read ops)
     PatternType pattern = PatternType::Sequential;
@@ -91,7 +91,7 @@ inline constexpr double kRateHeadroomSec = 2.0;
 inline constexpr double kDrainWaitCapSec = 120.0;
 inline constexpr double kDrainTimeoutGraceSec = 15.0;
 
-// Per-session byte budget for --max-bytes auto. Requires target_rate_bps > 0.
+// Per-session byte budget for --max-bytes auto. Requires target_rate_bytes_per_s > 0.
 uint64_t ComputeAutoMaxBytes(const RunConfig& cfg);
 
 // Estimated per-session token charge before Stat knows the real file size.
@@ -102,7 +102,7 @@ uint64_t EstimateSessionCharge(const RunConfig& cfg, bool use_vector);
 uint64_t ComputeBucketBurst(const RunConfig& cfg);
 
 // If max_bytes_auto and rate > 0, fill max_bytes from rate/max_inflight.
-// Uncapped (target_rate_bps == 0) requires explicit max_bytes > 0 — throws
+// Uncapped (target_rate_bytes_per_s == 0) requires explicit max_bytes > 0 — throws
 // if max_bytes_auto or max_bytes == 0.
 void ResolveRunConfig(RunConfig& cfg);
 

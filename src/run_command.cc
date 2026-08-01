@@ -46,10 +46,10 @@ std::string DefaultJobId() {
     return "local";
 }
 
-// e.g. "500.00 MB/s (from '4Gbps')", or "uncapped".
+// e.g. "4.00 Gbps (from '4Gbps')", or "uncapped".
 std::string DescribeTargetRate(const RunConfig& cfg) {
-    if (cfg.target_rate_bps == 0) return "uncapped";
-    std::string s = FormatRate(cfg.target_rate_bps);
+    if (cfg.target_rate_bytes_per_s == 0) return "uncapped";
+    std::string s = FormatRate(cfg.target_rate_bytes_per_s);
     if (!cfg.target_rate_input.empty()) s += " (from '" + cfg.target_rate_input + "')";
     return s;
 }
@@ -122,14 +122,14 @@ int RunEngine(const RunConfig& cfg) {
     // Burst covers a full max_inflight pipeline so the rate limiter can admit a full
     // set of in-flight session charges without waiting on a 1-charge refill.
     const uint64_t burst = ComputeBucketBurst(cfg);
-    TokenBucket bucket(cfg.target_rate_bps, burst);
+    TokenBucket bucket(cfg.target_rate_bytes_per_s, burst);
     InFlightSemaphore inflight(cfg.max_inflight);
     Scheduler sched(cfg);
 
     MetricsRegistry registry;
     const std::string job_id = cfg.job_id.empty() ? DefaultJobId() : cfg.job_id;
     registry.SetLabels(cfg.run_id, job_id, cfg.target, cfg.endpoint);
-    registry.SetConfigGauges(cfg.target_rate_bps, cfg.max_inflight);
+    registry.SetConfigGauges(cfg.target_rate_bytes_per_s, cfg.max_inflight);
 
     // Never call sync XrdCl Query from a session completion callback — it deadlocks
     // the client event loop (achieved rate sticks at 0). Resolve on the background
@@ -353,10 +353,20 @@ int RunEngine(const RunConfig& cfg) {
         if (!push->Push(final_snap)) {
             std::fprintf(stderr, "warning: final pushgateway push failed\n");
         }
+        // Overwrite rate gauges with 0 so Grafana/Prometheus do not hold the last
+        // achieved rate after the process exits (lastNotNull / scrape lag).
+        MetricsSnapshot idle = final_snap;
+        idle.achieved_rate_bytes = 0.0;
+        idle.inflight_reads = 0;
+        idle.by_data_server.clear();
+        idle.by_cms_site.clear();
+        if (!push->Push(idle)) {
+            std::fprintf(stderr, "warning: idle (zero-rate) pushgateway push failed\n");
+        }
         if (!cfg.pushgateway_keep) {
             push->Finish(job_id);
         } else {
-            std::fprintf(stderr, "pushgateway: keeping group job=%s instance=%s\n",
+            std::fprintf(stderr, "pushgateway: keeping idle group job=%s instance=%s\n",
                          cfg.pushgateway_job.c_str(), job_id.c_str());
         }
     }
@@ -372,7 +382,7 @@ int RunEngine(const RunConfig& cfg) {
     std::printf("ops:            %" PRIu64 "\n", final_snap.read_ops_total);
     std::printf("achieved:       %s\n",
                 FormatRate(static_cast<uint64_t>(final_snap.achieved_rate_bytes)).c_str());
-    if (cfg.target_rate_bps) {
+    if (cfg.target_rate_bytes_per_s) {
         std::printf("target:         %s\n", DescribeTargetRate(cfg).c_str());
     }
     std::printf("inflight peak:  %" PRIu32 " / %" PRIu32 "\n", inflight.peak(), inflight.max());

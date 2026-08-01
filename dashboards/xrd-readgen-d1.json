@@ -40,7 +40,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Achieved vs target (bytes/s, Bps\u2192MB/s SI). Achieved is cumulative bytes/wall on the generator steady_clock (same as run summary). Y-axis soft-min 0 so local near-target runs are not auto-zoomed. When uncapped (target_rate=0), the target series is omitted — panel is achieved-only capacity view.",
+      "description": "Achieved vs target (bits/s; Prom gauges are bytes/s \u00d7 8). Per-instance series are stacked (fleet composition); total is an unstacked overlay line (should ride the stack top). Target is dashed/unstacked when > 0. Y soft-min 0.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -48,15 +48,19 @@
           },
           "custom": {
             "axisCenteredZero": false,
-            "axisLabel": "MB/s",
+            "axisLabel": "bit/s",
             "axisSoftMin": 0,
             "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2,
+            "fillOpacity": 55,
+            "lineWidth": 1,
             "showPoints": "never",
-            "spanNulls": false
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
           },
-          "unit": "Bps"
+          "unit": "bps"
         },
         "overrides": [
           {
@@ -65,6 +69,21 @@
               "options": "target"
             },
             "properties": [
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "group": "A",
+                  "mode": "none"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
               {
                 "id": "custom.lineStyle",
                 "value": {
@@ -83,6 +102,36 @@
                 }
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^total "
+            },
+            "properties": [
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "group": "A",
+                  "mode": "none"
+                }
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 3
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
           }
         ]
       },
@@ -97,7 +146,7 @@
         "legend": {
           "calcs": [
             "mean",
-            "lastNotNull"
+            "last"
           ],
           "displayMode": "table",
           "placement": "bottom",
@@ -114,8 +163,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (run_id, target, instance) (readgen_achieved_rate_bytes{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"})",
-          "legendFormat": "achieved {{run_id}} {{instance}}",
+          "expr": "(sum by (run_id, target, instance) (readgen_achieved_rate_bytes{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"})) * 8",
+          "legendFormat": "{{run_id}} {{instance}}",
           "refId": "A"
         },
         {
@@ -123,9 +172,18 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (run_id, target, instance) (readgen_target_rate_bytes{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"}) > 0",
+          "expr": "((sum by (run_id, target, instance) (readgen_target_rate_bytes{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"})) * 8) > 0",
           "legendFormat": "target",
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(sum by (run_id) (readgen_achieved_rate_bytes{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"})) * 8",
+          "legendFormat": "total {{run_id}}",
+          "refId": "C"
         }
       ],
       "title": "Achieved vs target throughput",
@@ -136,7 +194,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Latest cumulative achieved rate (bytes / wall).",
+      "description": "Latest cumulative achieved rate (bits/s from bytes/wall \u00d7 8). Missing series \u2192 0 (idle after run exit).",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -159,7 +217,7 @@
               }
             ]
           },
-          "unit": "Bps"
+          "unit": "bps"
         }
       },
       "gridPos": {
@@ -174,7 +232,7 @@
         "graphMode": "area",
         "reduceOptions": {
           "calcs": [
-            "lastNotNull"
+            "last"
           ],
           "fields": "",
           "values": false
@@ -187,7 +245,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(readgen_achieved_rate_bytes{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"})",
+          "expr": "(sum(readgen_achieved_rate_bytes{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"}) * 8) or vector(0)",
           "refId": "A"
         }
       ],
@@ -199,7 +257,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Configured target rate (gauge, bytes/s). 0 means uncapped capacity mode.",
+      "description": "Configured target rate (displayed as bits/s). 0 means uncapped capacity mode.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -214,7 +272,7 @@
               }
             ]
           },
-          "unit": "Bps"
+          "unit": "bps"
         }
       },
       "gridPos": {
@@ -241,7 +299,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(readgen_target_rate_bytes{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"})",
+          "expr": "(sum(readgen_target_rate_bytes{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"})) * 8",
           "refId": "A"
         }
       ],
@@ -624,7 +682,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Arch efficiency: bytes read per CPU-second (NOT a network rate). Unit is SI bytes (e.g. 303 MB = 303e6 B per CPU-s). Do not compare to the MB/s throughput panel.",
+      "description": "Arch efficiency: bytes read per CPU-second (NOT a network rate). Unit is SI bytes (e.g. 303 MB = 303e6 B per CPU-s). Do not compare to the Mbps/Gbps throughput panels.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -734,46 +792,73 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 42 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 42
+      },
       "id": 103,
       "title": "Federation attribution",
       "type": "row"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "description": "Per CMS sitename: bytes/wall (same definition as overall readgen_achieved_rate_bytes). Stack ≈ D1 achieved when traffic is mapped. Prefer this over rate(counter) on Pushgateway.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Per CMS sitename: bits/s (Prom bytes/wall \u00d7 8; same definition as overall achieved). Stack \u2248 D1 total when traffic is mapped.",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
-            "axisLabel": "MB/s",
+            "axisLabel": "bit/s",
             "axisSoftMin": 0,
             "drawStyle": "line",
             "fillOpacity": 15,
             "lineWidth": 2,
             "showPoints": "never",
-            "stacking": { "group": "A", "mode": "normal" }
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
           },
-          "unit": "Bps"
+          "unit": "bps"
         }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 43 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 43
+      },
       "id": 11,
       "options": {
         "legend": {
-          "calcs": ["mean", "lastNotNull"],
+          "calcs": [
+            "mean",
+            "lastNotNull"
+          ],
           "displayMode": "table",
           "placement": "bottom",
           "showLegend": true,
           "sortBy": "Last *",
           "sortDesc": true
         },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "sum by (cms_site) (readgen_site_achieved_rate_bytes{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"})",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(sum by (cms_site) (readgen_site_achieved_rate_bytes{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"})) * 8",
           "legendFormat": "{{cms_site}}",
           "refId": "A"
         }
@@ -782,40 +867,62 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "description": "Per DataServer: bytes/wall (same as overall achieved). With limited max_inflight only a few servers are hot — idle series near zero is normal.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Per DataServer: bits/s (Prom bytes/wall \u00d7 8). With limited max_inflight only a few servers are hot \u2014 idle series near zero is normal.",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
-            "axisLabel": "MB/s",
+            "axisLabel": "bit/s",
             "axisSoftMin": 0,
             "drawStyle": "line",
             "fillOpacity": 10,
             "lineWidth": 2,
             "showPoints": "never",
-            "stacking": { "group": "A", "mode": "normal" }
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
           },
-          "unit": "Bps"
+          "unit": "bps"
         }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 43 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 43
+      },
       "id": 12,
       "options": {
         "legend": {
-          "calcs": ["mean", "lastNotNull"],
+          "calcs": [
+            "mean",
+            "lastNotNull"
+          ],
           "displayMode": "table",
           "placement": "right",
           "showLegend": true,
           "sortBy": "Last *",
           "sortDesc": true
         },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "sum by (data_server) (readgen_endpoint_achieved_rate_bytes{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"})",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(sum by (data_server) (readgen_endpoint_achieved_rate_bytes{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"})) * 8",
           "legendFormat": "{{data_server}}",
           "refId": "A"
         }
@@ -824,11 +931,16 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "description": "Completed FileSessions (Open→…→Close) per CMS site — not TCP connections.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Completed FileSessions (Open\u2192\u2026\u2192Close) per CMS site \u2014 not TCP connections.",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
             "axisSoftMin": 0,
             "drawStyle": "line",
@@ -839,20 +951,33 @@
           "unit": "short"
         }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 51 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 51
+      },
       "id": 13,
       "options": {
         "legend": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "displayMode": "table",
           "placement": "bottom",
           "showLegend": true
         },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "sum by (cms_site, result) (readgen_site_sessions_total{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"})",
           "legendFormat": "{{cms_site}} {{result}}",
           "refId": "A"
@@ -862,11 +987,16 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "description": "Completed FileSessions attributed to each resolved DataServer after redirect — not TCP connection count. XrdCl may multiplex sockets underneath.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Per DataServer: bits/s (Prom bytes/wall \u00d7 8). With limited max_inflight only a few servers are hot \u2014 idle series near zero is normal.",
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
             "axisSoftMin": 0,
             "drawStyle": "line",
@@ -877,20 +1007,33 @@
           "unit": "short"
         }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 51 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 51
+      },
       "id": 14,
       "options": {
         "legend": {
-          "calcs": ["lastNotNull"],
+          "calcs": [
+            "lastNotNull"
+          ],
           "displayMode": "table",
           "placement": "right",
           "showLegend": true
         },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
           "expr": "sum by (data_server, result) (readgen_endpoint_sessions_total{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"})",
           "legendFormat": "{{data_server}} {{result}}",
           "refId": "A"
@@ -971,15 +1114,20 @@
         "type": "query"
       },
       {
-        "current": {},
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
         "datasource": {
           "type": "prometheus",
           "uid": "${datasource}"
         },
         "definition": "label_values(readgen_bytes_read_total{job=~\"$job\"}, run_id)",
-        "includeAll": false,
+        "includeAll": true,
         "label": "run_id",
-        "multi": false,
+        "multi": true,
         "name": "run_id",
         "query": {
           "query": "label_values(readgen_bytes_read_total{job=~\"$job\"}, run_id)",

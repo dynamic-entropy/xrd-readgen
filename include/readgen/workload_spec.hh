@@ -33,7 +33,7 @@ struct TargetSpec {
     std::string filelist_input;       // original JSON string
     std::vector<std::string> files;
     std::string target_rate_input;    // empty = uncapped
-    uint64_t target_rate_bps = 0;
+    uint64_t target_rate_bytes_per_s = 0;
     uint32_t max_inflight = 16;
     PatternSpec pattern;
 };

@@ -11,7 +11,7 @@
       "name": "aaa-global",
       "endpoint": "root://xrootd-redirector.example/",
       "filelist": "../filelists/remote.txt",
-      "target_rate": "35MBps",
+      "target_rate": "280Mbps",
       "pattern": {
         "type": "sequential",
         "read_size": "1MiB",

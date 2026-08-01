@@ -41,7 +41,6 @@ std::string Lower(std::string u) {
 }
 
 // SI (KB/MB/GB = 1000^n) vs IEC binary (KiB/MiB/GiB = 1024^n).
-// Bare k/m/g default to SI (decimal).
 uint64_t ScaleBytes(double value, const std::string& unit_in) {
     const std::string u = Lower(unit_in);
     double mul = 1.0;
@@ -69,28 +68,9 @@ uint64_t ScaleBytes(double value, const std::string& unit_in) {
     return static_cast<uint64_t>(value * mul + 0.5);
 }
 
-// Mbps (bits) vs MBps (bytes): case-sensitive before folding.
-//   Mbps / mbps / Gbps  → bit rate
-//   MBps / MB/s / MiBps → byte rate
-bool LooksLikeBitRate(const std::string& unit) {
-    if (unit.empty()) return false;
-    // Explicit *bps with lowercase 'b' immediately before "ps" → bits
-    // e.g. Mbps, mbps, Gbps, kbps. Not MBps (capital B) or MiBps.
-    if (unit.size() >= 3) {
-        const std::string last3 = unit.substr(unit.size() - 3);
-        if (last3 == "bps" || last3 == "Bps") {
-            // "...bps": char before bps
-            if (unit.size() == 3) return true;  // "bps"
-            const char pref = unit[unit.size() - 4];
-            if (pref == 'i' || pref == 'I') return false;       // MiBps
-            if (pref == 'B') return false;                      // MBps / KBps / GBps
-            if (pref == 'b' || std::isalpha(static_cast<unsigned char>(pref))) {
-                // mbps, Mbps, Gbps, kbps — lowercase b in "bps"
-                return last3[0] == 'b';
-            }
-        }
-    }
-    return false;
+uint64_t BitsPerSecToBytesPerSec(double bits_per_sec) {
+    if (bits_per_sec < 0) throw std::runtime_error("rate must be non-negative");
+    return static_cast<uint64_t>(bits_per_sec / 8.0 + 0.5);
 }
 
 }  // namespace
@@ -118,42 +98,45 @@ uint64_t ParseTargetRateString(const std::string& s) {
 }
 
 uint64_t ParseRateString(const std::string& s) {
-    // Accept: 100MBps, 100MiBps, 1Gbps, 500MB/s, 35Mbps, 1e6 (raw bytes/sec)
+    // SI bit rates only → bytes/sec. Reject byte-rate spellings explicitly so
+    // "MBps" (megabytes) is not silently folded into "mbps" (megabits).
     std::string t = s;
     if (t.size() >= 2 && (t.compare(t.size() - 2, 2, "/s") == 0 || t.compare(t.size() - 2, 2, "/S") == 0)) {
-        t.resize(t.size() - 2);
+        throw std::runtime_error(
+            "byte rates like '" + s + "' are not accepted; use Mbps/Gbps (SI bits)");
     }
     double value = 0;
     std::string unit;
     if (!ParseNumberSuffix(t, value, unit)) throw std::runtime_error("cannot parse rate '" + s + "'");
     if (value < 0) throw std::runtime_error("rate must be non-negative");
 
-    if (unit.empty()) return static_cast<uint64_t>(value + 0.5);
+    if (unit.empty()) return BitsPerSecToBytesPerSec(value);
 
-    if (LooksLikeBitRate(unit)) {
-        std::string u = Lower(unit);
-        if (u.size() >= 3 && u.compare(u.size() - 3, 3, "bps") == 0) u.resize(u.size() - 3);
-        double bits = value;
-        if (u.empty() || u == "b") {
-            // 8bps
-        } else if (u == "k" || u == "kb")
-            bits *= 1e3;
-        else if (u == "m" || u == "mb")
-            bits *= 1e6;
-        else if (u == "g" || u == "gb")
-            bits *= 1e9;
-        else if (u == "t" || u == "tb")
-            bits *= 1e12;
-        else
-            throw std::runtime_error("unknown bit-rate unit '" + unit + "'");
-        return static_cast<uint64_t>(bits / 8.0 + 0.5);
+    // Reject byte-rate spellings before case-fold (MBps / MiBps must not become Mbps).
+    const std::string u = Lower(unit);
+    if (u.find("ibps") != std::string::npos ||
+        (unit.size() >= 3 && unit.compare(unit.size() - 3, 3, "Bps") == 0)) {
+        throw std::runtime_error(
+            "byte rates like '" + s + "' are not accepted; use Mbps/Gbps (SI bits)");
     }
-
-    // Byte rates: strip trailing "ps" from MBps / MiBps; ScaleBytes accepts
-    // bare k/m/g/t as SI.
-    std::string u = Lower(unit);
-    if (u.size() >= 2 && u.compare(u.size() - 2, 2, "ps") == 0) u.resize(u.size() - 2);
-    return ScaleBytes(value, u);
+    if (u.size() < 3 || u.compare(u.size() - 3, 3, "bps") != 0) {
+        throw std::runtime_error("unknown rate unit '" + unit + "' (use Mbps/Gbps/bps)");
+    }
+    const std::string prefix = u.substr(0, u.size() - 3);
+    double bits = value;
+    if (prefix.empty() || prefix == "b") {
+        // bps
+    } else if (prefix == "k" || prefix == "kb")
+        bits *= 1e3;
+    else if (prefix == "m" || prefix == "mb")
+        bits *= 1e6;
+    else if (prefix == "g" || prefix == "gb")
+        bits *= 1e9;
+    else if (prefix == "t" || prefix == "tb")
+        bits *= 1e12;
+    else
+        throw std::runtime_error("unknown rate unit '" + unit + "' (use Mbps/Gbps/bps)");
+    return BitsPerSecToBytesPerSec(bits);
 }
 
 uint64_t ParseSizeString(const std::string& s) {
@@ -180,7 +163,23 @@ std::string FormatBytes(uint64_t n) {
 }
 
 std::string FormatRate(uint64_t bytes_per_sec) {
-    return FormatBytes(bytes_per_sec) + "/s";
+    const double bits = static_cast<double>(bytes_per_sec) * 8.0;
+    char buf[64];
+    const double kb = 1e3;
+    const double mb = 1e6;
+    const double gb = 1e9;
+    const double tb = 1e12;
+    if (bits >= tb)
+        std::snprintf(buf, sizeof(buf), "%.2f Tbps", bits / tb);
+    else if (bits >= gb)
+        std::snprintf(buf, sizeof(buf), "%.2f Gbps", bits / gb);
+    else if (bits >= mb)
+        std::snprintf(buf, sizeof(buf), "%.2f Mbps", bits / mb);
+    else if (bits >= kb)
+        std::snprintf(buf, sizeof(buf), "%.2f kbps", bits / kb);
+    else
+        std::snprintf(buf, sizeof(buf), "%.0f bps", bits);
+    return buf;
 }
 
 std::string FormatDuration(double seconds) {

@@ -11,7 +11,7 @@
       "name": "local-dev",
       "endpoint": "root://localhost:10945/",
       "filelist": "../filelists/local.txt",
-      "target_rate": "50MBps",
+      "target_rate": "400Mbps",
       "pattern": {
         "type": "mixed",
         "read_size": "1MiB",

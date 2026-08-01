@@ -2,10 +2,14 @@
 """Fork N concurrent uncapped xrd-readgen processes (one XrdCl PostMaster each).
 
 Fleet labelling (Grafana):
-  All children share one --run_id: {prefix}-n{N}-mi{max_inflight}
+  All children share one stable --run-id (default: --run-prefix). Reuse the same
+  run_id across cells so D1 overlays on one series; N / max_inflight are knobs,
+  not part of the id.
   Each child has a unique --job-id (Pushgateway instance): {hostname}-i{i}
   FileSink dirs are per-instance so result.json does not collide:
     {results_dir}/i{i}/{run_id}/
+  With Pushgateway, children keep idle (zero-rate) gauges on exit so achieved
+  rate drops to 0 instead of sticking at the last sample.
 """
 
 from __future__ import annotations
@@ -122,6 +126,7 @@ def build_child_argv(
     results_dir: str,
     pushgateway: str,
     pushgateway_job: str,
+    pushgateway_keep: bool,
     dry_run: bool,
     no_sitename: bool,
 ) -> List[str]:
@@ -155,6 +160,9 @@ def build_child_argv(
     ]
     if pushgateway:
         cmd += ["--pushgateway", pushgateway, "--pushgateway-job", pushgateway_job]
+        # Keep idle zero-rate gauges so D1 does not hold lastNotNull after exit.
+        if pushgateway_keep:
+            cmd.append("--pushgateway-keep")
     if dry_run:
         cmd.append("--dry-run")
     if no_sitename:
@@ -175,6 +183,7 @@ def run_fleet(
     pushgateway_job: str = "xrd-readgen",
     results_dir: str = "results",
     run_prefix: str = "multi",
+    run_id: Optional[str] = None,
     binary: Optional[str] = None,
     session_timeout: str = "90s",
     connection_window: int = 15,
@@ -182,6 +191,7 @@ def run_fleet(
     no_sitename: bool = False,
     skip_auth_check: bool = False,
     print_summary: bool = True,
+    pushgateway_keep: bool = True,
 ) -> Dict[str, Any]:
     """Spawn N processes; return a structured fleet summary dict."""
     if n < 1:
@@ -199,7 +209,8 @@ def run_fleet(
     results_root.mkdir(parents=True, exist_ok=True)
 
     host = _host_short()
-    fleet_run_id = f"{run_prefix}-n{n}-mi{max_inflight}"
+    # Stable run_id for Grafana: do not encode N / max_inflight (reuse forever).
+    fleet_run_id = (run_id or run_prefix).strip() or "multi"
 
     if print_summary:
         print(f"==> multi-run: N={n} max_inflight/proc={max_inflight} duration={duration}")
@@ -208,8 +219,9 @@ def run_fleet(
         print(f"    filelist: {filelist}")
         print(f"    chunk:    {chunk_size}  max_bytes: {max_bytes}")
         print(f"    results:  {results_root}/i*/{fleet_run_id}/")
-        print(f"    run_id:   {fleet_run_id}  (shared across all {n} processes)")
-        print(f"    prefix:   {run_prefix}")
+        print(f"    run_id:   {fleet_run_id}  (stable; shared across all {n} processes)")
+        if run_id is None and run_prefix:
+            print(f"    prefix:   {run_prefix}  (= run_id)")
         if dry_run:
             print("    auth:     (dry-run)")
         elif skip_auth_check:
@@ -258,6 +270,7 @@ def run_fleet(
                 results_dir=str(inst_results),
                 pushgateway=pushgateway,
                 pushgateway_job=pushgateway_job,
+                pushgateway_keep=pushgateway_keep,
                 dry_run=dry_run,
                 no_sitename=no_sitename,
             )
@@ -291,7 +304,7 @@ def run_fleet(
         signal.signal(signal.SIGTERM, prev_term)
 
     processes: List[Dict[str, Any]] = []
-    fleet_sum_bps = 0.0
+    fleet_sum_bits_per_s = 0.0
     sum_count = 0
     sessions_ok = 0
     sessions_fail = 0
@@ -301,11 +314,13 @@ def run_fleet(
     for m in meta:
         result_json = Path(m["result_dir"]) / "result.json"
         data = _load_result(result_json)
-        bps = data.get("achieved_bps")
-        mbps = None
-        if isinstance(bps, (int, float)):
-            mbps = float(bps) / 1e6
-            fleet_sum_bps += float(bps)
+        bits = data.get("achieved_bits_per_s")
+        if bits is None and isinstance(data.get("achieved_bytes_per_s"), (int, float)):
+            bits = float(data["achieved_bytes_per_s"]) * 8.0
+        mbps = None  # SI megabits/sec
+        if isinstance(bits, (int, float)):
+            mbps = float(bits) / 1e6
+            fleet_sum_bits_per_s += float(bits)
             sum_count += 1
         ok = int(data.get("sessions_ok") or 0)
         fail = int(data.get("sessions_fail") or 0)
@@ -321,8 +336,8 @@ def run_fleet(
             "i": m["i"],
             "job_id": m["job_id"],
             "exit": ec,
-            "achieved_bps": bps,
-            "achieved_MBps": mbps,
+            "achieved_bits_per_s": bits if isinstance(bits, (int, float)) else None,
+            "achieved_Mbps": mbps,
             "sessions_ok": ok,
             "sessions_fail": fail,
             "errors": errs if isinstance(errs, dict) else {},
@@ -341,8 +356,8 @@ def run_fleet(
         "chunk_size": chunk_size,
         "max_bytes": max_bytes,
         "duration": duration,
-        "fleet_achieved_bps": fleet_sum_bps if sum_count else None,
-        "fleet_achieved_MBps": (fleet_sum_bps / 1e6) if sum_count else None,
+        "fleet_achieved_bits_per_s": fleet_sum_bits_per_s if sum_count else None,
+        "fleet_achieved_Mbps": (fleet_sum_bits_per_s / 1e6) if sum_count else None,
         "result_count": sum_count,
         "sessions_ok": sessions_ok,
         "sessions_fail": sessions_fail,
@@ -364,11 +379,11 @@ def run_fleet(
             "sum ≈ site push)"
         )
         print(
-            f"{'i':<4} {'job_id':<28} {'exit':<6} {'achieved_MBps':<14} "
+            f"{'i':<4} {'job_id':<28} {'exit':<6} {'achieved_Mbps':<14} "
             f"{'ok/fail':<12} errors"
         )
         for p in processes:
-            mbps_s = "n/a" if p["achieved_MBps"] is None else f"{p['achieved_MBps']:.2f}"
+            mbps_s = "n/a" if p["achieved_Mbps"] is None else f"{p['achieved_Mbps']:.2f}"
             errs = p["errors"]
             errs_s = (
                 ",".join(f"{a}:{b}" for a, b in errs.items()) if errs else "-"
@@ -383,11 +398,11 @@ def run_fleet(
                     print(f"        {ln}")
         if sum_count:
             print(
-                f"    fleet_sum_achieved_MBps≈{fleet_sum_bps / 1e6:.2f}  "
+                f"    fleet_sum_achieved_Mbps≈{fleet_sum_bits_per_s / 1e6:.2f}  "
                 f"(from {sum_count}/{n} result.json)"
             )
         print(
-            f"    D1: select run_id={fleet_run_id}, instance=All — "
+            f"    D1: select run_id={fleet_run_id} (stable), instance=All — "
             "Achieved panel has per-instance + total"
         )
         print(f"    logs: {results_root}/{fleet_run_id}-i*.log")
@@ -435,7 +450,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--pushgateway-job", default="xrd-readgen", help="Pushgateway job label"
     )
     p.add_argument("--results-dir", default="results", help="FileSink root")
-    p.add_argument("--run-prefix", default="multi", help="run_id prefix")
+    p.add_argument(
+        "--run-id",
+        default="",
+        help="Stable Grafana run_id (default: --run-prefix). Reuse across cells.",
+    )
+    p.add_argument(
+        "--run-prefix",
+        default="multi",
+        help="Default run_id when --run-id is omitted",
+    )
+    p.add_argument(
+        "--pushgateway-delete",
+        action="store_true",
+        help="DELETE Pushgateway group on exit (default: keep idle zero-rate gauges)",
+    )
     p.add_argument("--binary", default=None, help="xrd-readgen binary path")
     p.add_argument("--session-timeout", default="90s", help="Per-session timeout")
     p.add_argument(
@@ -470,12 +499,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         pushgateway_job=args.pushgateway_job,
         results_dir=args.results_dir,
         run_prefix=args.run_prefix,
+        run_id=args.run_id or None,
         binary=args.binary,
         session_timeout=args.session_timeout,
         connection_window=args.connection_window,
         dry_run=args.dry_run,
         no_sitename=args.no_sitename_query,
         skip_auth_check=args.skip_auth_check,
+        pushgateway_keep=not args.pushgateway_delete,
     )
     return int(summary.get("exit") or 0)
 

@@ -280,7 +280,8 @@ class FileSession : public std::enable_shared_from_this<FileSession> {
         result_.read_s = SecsBetween(t_open_, t_last_byte_);
         result_.close_ms = MsBetween(t_last_byte_, t_end_);
         result_.total_s = SecsBetween(t_start_, t_end_);
-        result_.throughput_mb_s = result_.read_s > 0 ? bytes_read_ / result_.read_s / 1e6 : 0.0;
+        result_.throughput_Mbps =
+            result_.read_s > 0 ? (bytes_read_ / result_.read_s) * 8.0 / 1e6 : 0.0;
         result_.op_lat_min_ms = ops_ > 0 ? lat_min_ms_ : 0.0;
         result_.op_lat_avg_ms = ops_ > 0 ? lat_sum_ms_ / ops_ : 0.0;
         result_.op_lat_max_ms = lat_max_ms_;

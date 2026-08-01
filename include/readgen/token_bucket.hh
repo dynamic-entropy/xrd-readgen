@@ -7,10 +7,10 @@
 
 namespace readgen {
 
-// Bytes/sec token bucket. Thread-safe. rate_bps == 0 → uncapped.
+// Bytes/sec token bucket. Thread-safe. rate_bytes_per_s == 0 → uncapped.
 class TokenBucket {
    public:
-    explicit TokenBucket(uint64_t rate_bps, uint64_t burst_bytes = 0);
+    explicit TokenBucket(uint64_t rate_bytes_per_s, uint64_t burst_bytes = 0);
 
     // Non-blocking take. Returns true if n tokens were taken.
     bool TryAcquire(uint64_t n);
@@ -20,12 +20,12 @@ class TokenBucket {
 
     void Refund(uint64_t n);
 
-    uint64_t rate_bps() const { return rate_bps_; }
+    uint64_t rate_bytes_per_s() const { return rate_bytes_per_s_; }
 
    private:
     void RefillUnlocked(std::chrono::steady_clock::time_point now);
 
-    const uint64_t rate_bps_;
+    const uint64_t rate_bytes_per_s_;
     const uint64_t capacity_;
     double tokens_ = 0.0;
     std::chrono::steady_clock::time_point last_;
