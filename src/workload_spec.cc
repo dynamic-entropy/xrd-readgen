@@ -158,7 +158,6 @@ std::string Sha256Hex(const std::string& data) {
 
 json PatternToJson(const PatternSpec& p) {
     json j = json::object();
-    j["file_fraction"] = p.file_fraction;
     j["max_bytes"] = p.max_bytes_input;
     j["max_bytes_auto"] = p.max_bytes_auto;
     j["max_bytes_resolved"] = p.max_bytes;
@@ -182,7 +181,7 @@ json TargetToJson(const TargetSpec& t) {
     j["pattern"] = PatternToJson(t.pattern);
     j["target_rate"] = t.target_rate_input;
     j["target_rate_bps"] = t.target_rate_bps;
-    j["workers"] = t.workers;
+    j["max_inflight"] = t.max_inflight;
     return j;
 }
 
@@ -396,7 +395,7 @@ ValidateResult ValidateWorkloadJson(const json& root, const std::string& workloa
                 continue;
             }
             RejectUnknown(r, tj,
-                          {"name", "endpoint", "filelist", "target_rate", "workers", "pattern"},
+                          {"name", "endpoint", "filelist", "target_rate", "max_inflight", "pattern"},
                           base);
 
             if (!RequireString(r, tj, "name", base + ".name", t.name) || t.name.empty()) {
@@ -436,13 +435,13 @@ ValidateResult ValidateWorkloadJson(const json& root, const std::string& workloa
                 }
             }
 
-            if (tj.contains("workers")) {
-                if (!tj["workers"].is_number_integer() ||
-                    tj["workers"].get<json::number_integer_t>() < 1 ||
-                    tj["workers"].get<json::number_integer_t>() > 100000) {
-                    AddIssue(r, base + ".workers", "must be an integer in [1, 100000]");
+            if (tj.contains("max_inflight")) {
+                if (!tj["max_inflight"].is_number_integer() ||
+                    tj["max_inflight"].get<json::number_integer_t>() < 1 ||
+                    tj["max_inflight"].get<json::number_integer_t>() > 100000) {
+                    AddIssue(r, base + ".max_inflight", "must be an integer in [1, 100000]");
                 } else {
-                    t.workers = static_cast<uint32_t>(tj["workers"].get<uint64_t>());
+                    t.max_inflight = static_cast<uint32_t>(tj["max_inflight"].get<uint64_t>());
                 }
             }
 
@@ -453,7 +452,7 @@ ValidateResult ValidateWorkloadJson(const json& root, const std::string& workloa
             } else {
                 const json& pj = tj["pattern"];
                 RejectUnknown(r, pj,
-                              {"type", "read_size", "file_fraction", "vector_fraction",
+                              {"type", "read_size", "vector_fraction",
                                "vector_chunks", "max_bytes"},
                               base + ".pattern");
                 std::string type_s;
@@ -475,8 +474,6 @@ ValidateResult ValidateWorkloadJson(const json& root, const std::string& workloa
                         }
                     }
                 }
-                OptionalDouble(r, pj, "file_fraction", base + ".pattern.file_fraction",
-                               t.pattern.file_fraction, 0.0, 1.0);
                 OptionalDouble(r, pj, "vector_fraction", base + ".pattern.vector_fraction",
                                t.pattern.vector_fraction, 0.0, 1.0);
                 if (pj.contains("vector_chunks")) {
@@ -556,12 +553,11 @@ RunConfig ToRunConfig(const WorkloadSpec& wl, const TargetSpec& target) {
     cfg.filelist_path = target.filelist;
     cfg.target_rate_bps = target.target_rate_bps;
     cfg.target_rate_input = target.target_rate_input;
-    cfg.workers = target.workers;
+    cfg.max_inflight = target.max_inflight;
     cfg.pattern = target.pattern.type;
     cfg.chunk_size = target.pattern.chunk_size;
     cfg.vector_chunks = target.pattern.vector_chunks;
     cfg.vector_fraction = target.pattern.vector_fraction;
-    cfg.file_fraction = target.pattern.file_fraction;
     cfg.max_bytes = target.pattern.max_bytes;
     cfg.max_bytes_auto = target.pattern.max_bytes_auto;
     cfg.seed = wl.seed;

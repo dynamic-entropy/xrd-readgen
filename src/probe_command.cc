@@ -177,7 +177,6 @@ int RunProbeCommand(const ProbeOptions& opts) {
         so.chunk_size = 1;
         so.max_bytes = 1;
         so.vector_chunks = 0;
-        so.file_fraction = 1.0;
         so.wall_timeout_s = wl.client_tuning.session_timeout_s;
 
         const std::string target_name = item.target;

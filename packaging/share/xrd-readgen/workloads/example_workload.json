@@ -12,13 +12,12 @@
       "endpoint": "root://xrootd-redirector.example/",
       "filelist": "../filelists/remote.txt",
       "target_rate": "35MBps",
-      "workers": 8,
       "pattern": {
         "type": "sequential",
         "read_size": "1MiB",
-        "file_fraction": 1.0,
         "max_bytes": "auto"
-      }
+      },
+      "max_inflight": 8
     }
   ],
   "client_tuning": {

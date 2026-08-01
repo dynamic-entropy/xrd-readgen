@@ -61,7 +61,7 @@ void PrintDryRun(const RunConfig& cfg) {
     std::printf("endpoint:       %s\n", cfg.endpoint.c_str());
     std::printf("filelist:       %s (%zu files)\n", cfg.filelist_path.c_str(), cfg.files.size());
     std::printf("target_rate:    %s\n", DescribeTargetRate(cfg).c_str());
-    std::printf("workers:        %" PRIu32 "\n", cfg.workers);
+    std::printf("max_inflight:   %" PRIu32 "\n", cfg.max_inflight);
     std::printf("pattern:        %s\n", PatternTypeName(cfg.pattern));
     std::printf("chunk_size:     %s\n", FormatBytes(cfg.chunk_size).c_str());
     if (cfg.pattern == PatternType::Vector || cfg.pattern == PatternType::Mixed) {
@@ -69,7 +69,6 @@ void PrintDryRun(const RunConfig& cfg) {
         if (cfg.pattern == PatternType::Mixed)
             std::printf("vector_fraction:%.2f\n", cfg.vector_fraction);
     }
-    std::printf("file_fraction:  %.3f\n", cfg.file_fraction);
     if (cfg.max_bytes > 0) {
         std::printf("max_bytes:      %s%s\n", FormatBytes(cfg.max_bytes).c_str(),
                     cfg.max_bytes_auto ? " (auto)" : "");
@@ -120,17 +119,17 @@ int RunEngine(const RunConfig& cfg) {
                      "sitename_query: on (background thread; independent of I/O and scheduling)\n");
     }
 
-    // Burst covers a full worker pipeline so the rate limiter can admit a full
+    // Burst covers a full max_inflight pipeline so the rate limiter can admit a full
     // set of in-flight session charges without waiting on a 1-charge refill.
     const uint64_t burst = ComputeBucketBurst(cfg);
     TokenBucket bucket(cfg.target_rate_bps, burst);
-    InFlightSemaphore inflight(cfg.workers);
+    InFlightSemaphore inflight(cfg.max_inflight);
     Scheduler sched(cfg);
 
     MetricsRegistry registry;
     const std::string job_id = cfg.job_id.empty() ? DefaultJobId() : cfg.job_id;
     registry.SetLabels(cfg.run_id, job_id, cfg.target, cfg.endpoint);
-    registry.SetConfigGauges(cfg.target_rate_bps, cfg.workers);
+    registry.SetConfigGauges(cfg.target_rate_bps, cfg.max_inflight);
 
     // Never call sync XrdCl Query from a session completion callback — it deadlocks
     // the client event loop (achieved rate sticks at 0). Resolve on the background
@@ -196,10 +195,10 @@ int RunEngine(const RunConfig& cfg) {
                                    std::chrono::duration<double>(cfg.duration_s));
 
     std::fprintf(stderr,
-                 "run %s: duration=%s rate=%s workers=%" PRIu32
+                 "run %s: duration=%s rate=%s max_inflight=%" PRIu32
                  " pattern=%s files=%zu burst=%s\n",
                  cfg.run_id.c_str(), FormatDuration(cfg.duration_s).c_str(),
-                 DescribeTargetRate(cfg).c_str(), cfg.workers, PatternTypeName(cfg.pattern),
+                 DescribeTargetRate(cfg).c_str(), cfg.max_inflight, PatternTypeName(cfg.pattern),
                  cfg.files.size(), FormatBytes(burst).c_str());
 
     auto take_snapshot = [&] {
@@ -459,7 +458,7 @@ int RunRunCommand(const RunConfig& cfg_in) {
         return 0;
     }
     if (cfg.max_bytes_auto) {
-        std::fprintf(stderr, "max_bytes auto → %s (rate/workers × %.0fs, capped at %s)\n",
+        std::fprintf(stderr, "max_bytes auto → %s (rate/max_inflight × %.0fs, capped at %s)\n",
                      FormatBytes(cfg.max_bytes).c_str(), kAutoMaxAmortizeSec,
                      FormatBytes(kAutoMaxHardCapBytes).c_str());
     }

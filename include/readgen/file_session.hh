@@ -12,9 +12,8 @@ struct FileSessionOptions {
     std::string url;
     uint32_t chunk_size = 1 << 20;  // bytes per read op (default 1 MiB)
     uint64_t offset = 0;            // starting offset (ignored if random_offset)
-    uint64_t max_bytes = 0;         // 0 = no hard cap beyond file_fraction
+    uint64_t max_bytes = 0;         // 0 = no hard byte cap (read whole file)
     uint16_t vector_chunks = 0;     // >0: issue VectorReads of N chunks per op
-    double file_fraction = 1.0;     // fraction of file size to read (after Stat)
     bool random_offset = false;     // pick start offset after Stat (seeded)
     uint64_t offset_seed = 0;       // RNG seed for random_offset
     // Soft wall clock for the whole session (0 = disabled). A shared deadline

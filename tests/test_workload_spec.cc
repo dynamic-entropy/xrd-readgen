@@ -131,7 +131,7 @@ TEST(WorkloadSpec, UncappedRateTokens) {
             "endpoint": "root://localhost:10945/",
             "filelist": "files.txt",
             "target_rate": "PLACEHOLDER",
-            "workers": 4,
+            "max_inflight": 4,
             "pattern": {"type": "sequential", "read_size": "1MiB", "max_bytes": "8MiB"}
           }]
         })");
@@ -169,7 +169,7 @@ TEST(WorkloadSpec, JsonParseErrorReportsPath) {
     EXPECT_NE(r.issues.front().message.find("JSON parse error"), std::string::npos);
 }
 
-TEST(WorkloadSpec, WorkersOutOfRange) {
+TEST(WorkloadSpec, MaxInflightOutOfRange) {
     json j = json::parse(R"({
       "schema_version": 1,
       "run_id": "x",
@@ -179,16 +179,17 @@ TEST(WorkloadSpec, WorkersOutOfRange) {
         "name": "t0",
         "endpoint": "root://localhost:10945/",
         "filelist": "files.txt",
-        "workers": 0,
+        "max_inflight": 0,
         "pattern": {"type": "sequential"}
       }]
     })");
     const auto r = ValidateWorkloadJson(j, FixtureDir().string());
     EXPECT_FALSE(r.ok);
-    EXPECT_TRUE(HasField(r, "targets[0].workers"));
+    EXPECT_TRUE(HasField(r, "targets[0].max_inflight"));
 }
 
-TEST(WorkloadSpec, FileFractionOutOfRange) {
+TEST(WorkloadSpec, RejectsUnknownFileFractionKey) {
+    // file_fraction removed — unknown keys under pattern must fail validation.
     json j = json::parse(R"({
       "schema_version": 1,
       "run_id": "x",
@@ -198,7 +199,9 @@ TEST(WorkloadSpec, FileFractionOutOfRange) {
         "name": "t0",
         "endpoint": "root://localhost:10945/",
         "filelist": "files.txt",
-        "pattern": {"type": "sequential", "file_fraction": 1.5}
+        "target_rate": "10MBps",
+        "max_inflight": 4,
+        "pattern": {"type": "sequential", "file_fraction": 0.5}
       }]
     })");
     const auto r = ValidateWorkloadJson(j, FixtureDir().string());
@@ -214,7 +217,7 @@ TEST(WorkloadSpec, ToRunConfigMapsFields) {
     EXPECT_EQ(cfg.run_id, "fixture-valid");
     EXPECT_EQ(cfg.target, "t0");
     EXPECT_EQ(cfg.endpoint, "root://localhost:10945/");
-    EXPECT_EQ(cfg.workers, 4u);
+    EXPECT_EQ(cfg.max_inflight, 4u);
     EXPECT_EQ(cfg.target_rate_bps, 10000000u);
     EXPECT_EQ(cfg.seed, 42u);
     EXPECT_TRUE(cfg.max_bytes_auto);

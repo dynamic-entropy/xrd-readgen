@@ -110,9 +110,9 @@ void MetricsRegistry::SetLabels(std::string run_id, std::string job_id, std::str
     endpoint_ = std::move(endpoint);
 }
 
-void MetricsRegistry::SetConfigGauges(uint64_t target_rate_bps, uint32_t workers) {
+void MetricsRegistry::SetConfigGauges(uint64_t target_rate_bps, uint32_t max_inflight) {
     target_rate_bytes_.store(target_rate_bps, std::memory_order_relaxed);
-    workers_configured_.store(workers, std::memory_order_relaxed);
+    max_inflight_.store(max_inflight, std::memory_order_relaxed);
 }
 
 void MetricsRegistry::SetSiteMap(const SiteMap* map) { site_map_ = map; }
@@ -225,7 +225,7 @@ MetricsSnapshot MetricsRegistry::Snapshot(double wall_s) {
     s.redirects_per_open = redirects_per_open_.Snapshot();
     s.inflight_reads = inflight_reads_.load(std::memory_order_relaxed);
     s.peak_inflight = peak_inflight_.load(std::memory_order_relaxed);
-    s.workers_configured = workers_configured_.load(std::memory_order_relaxed);
+    s.max_inflight = max_inflight_.load(std::memory_order_relaxed);
     s.cpu_seconds_total = static_cast<double>(cpu_us_.load(std::memory_order_relaxed)) / 1e6;
     s.process_resident_memory_bytes = rss_bytes_.load(std::memory_order_relaxed);
 

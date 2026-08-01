@@ -329,7 +329,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Live in-flight sessions vs configured workers.",
+      "description": "Live in-flight sessions vs configured max_inflight.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -382,8 +382,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (instance, run_id) (readgen_workers_configured{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"})",
-          "legendFormat": "workers {{instance}}",
+          "expr": "sum by (instance, run_id) (readgen_max_inflight{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"})",
+          "legendFormat": "max_inflight {{instance}}",
           "refId": "B"
         },
         {
@@ -396,7 +396,7 @@
           "refId": "C"
         }
       ],
-      "title": "In-flight vs workers",
+      "title": "In-flight vs max_inflight",
       "type": "timeseries"
     },
     {
@@ -783,7 +783,7 @@
     },
     {
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "description": "Per DataServer: bytes/wall (same as overall achieved). With limited workers only a few servers are hot — idle series near zero is normal.",
+      "description": "Per DataServer: bytes/wall (same as overall achieved). With limited max_inflight only a few servers are hot — idle series near zero is normal.",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },

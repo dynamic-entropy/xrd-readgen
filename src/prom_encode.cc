@@ -137,8 +137,8 @@ std::string EncodePrometheusText(const MetricsSnapshot& snap) {
                    snap.inflight_reads);
     AppendGaugeU64(o, "readgen_peak_inflight", "Peak in-flight file sessions this run", L,
                    snap.peak_inflight);
-    AppendGaugeU64(o, "readgen_workers_configured", "Configured max in-flight workers", L,
-                   snap.workers_configured);
+    AppendGaugeU64(o, "readgen_max_inflight", "Configured max in-flight sessions", L,
+                   snap.max_inflight);
     AppendGauge(o, "readgen_cpu_seconds_total", "Process CPU time (utime+stime) in seconds", L,
                 snap.cpu_seconds_total);
     AppendGaugeU64(o, "process_resident_memory_bytes", "Process RSS in bytes", L,

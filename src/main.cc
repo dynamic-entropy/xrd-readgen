@@ -86,8 +86,8 @@ int main(int argc, char** argv) {
     auto* rate_opt = run_cmd->add_option(
         "--rate", rate_str,
         "Target rate (prefer MBps/Gbps SI; also MiBps/Mbps); omit / 0 / uncapped for capacity mode");
-    auto* workers_opt =
-        run_cmd->add_option("--workers", run_cfg.workers, "Max in-flight sessions (default 16)")
+    auto* max_inflight_opt =
+        run_cmd->add_option("--max-inflight", run_cfg.max_inflight, "Max in-flight sessions (default 16)")
             ->check(CLI::Range(1u, 100000u));
     auto* pattern_opt = run_cmd->add_option("--pattern", pattern_str, "sequential|random|vector|mixed");
     auto* chunk_opt =
@@ -98,11 +98,9 @@ int main(int argc, char** argv) {
         run_cmd->add_option("--vector-fraction", run_cfg.vector_fraction,
                             "Mixed pattern: fraction of sessions using VectorRead (default 0.4)")
             ->check(CLI::Range(0.0, 1.0));
-    auto* file_fraction_opt =
-        run_cmd->add_option("--file-fraction", run_cfg.file_fraction, "Fraction of each file to read");
     auto* max_bytes_opt = run_cmd->add_option(
         "--max-bytes", max_bytes_str,
-        "Session byte cap (SIZE, or 'auto' from --rate/--workers; required SIZE when uncapped; "
+        "Session byte cap (SIZE, or 'auto' from --rate/--max-inflight; required SIZE when uncapped; "
         "default auto)");
     auto* session_timeout_opt = run_cmd->add_option(
         "--session-timeout", session_timeout_str, "Per-session wall timeout (0 to disable; default 60s)");
@@ -175,8 +173,8 @@ int main(int argc, char** argv) {
 
         const std::vector<CLI::Option*> legacy_config_opts = {
             endpoint_opt,         filelist_opt,         duration_opt,       rate_opt,
-            workers_opt,          pattern_opt,          chunk_opt,          vector_chunks_opt,
-            vector_fraction_opt,  file_fraction_opt,    max_bytes_opt,      session_timeout_opt,
+            max_inflight_opt,          pattern_opt,          chunk_opt,          vector_chunks_opt,
+            vector_fraction_opt,  max_bytes_opt,      session_timeout_opt,
             connection_window_opt, connection_retry_opt, request_timeout_opt, seed_opt,
             run_id_opt,           job_id_opt,           results_dir_opt,    snapshot_opt,
             no_results_opt,       pushgateway_opt,      pushgateway_job_opt, pushgateway_keep_opt};

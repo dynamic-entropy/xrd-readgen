@@ -17,14 +17,13 @@ struct RunConfig {
     std::string filelist_path;       // source path (for dry-run display)
     uint64_t target_rate_bps = 0;    // 0 = uncapped
     std::string target_rate_input;   // original --rate string (for operator echo)
-    uint32_t workers = 16;           // max in-flight FileSessions
+    uint32_t max_inflight = 16;           // max concurrent FileSessions (outstanding read ops)
     PatternType pattern = PatternType::Sequential;
     uint32_t chunk_size = 1 << 20;   // bytes per read chunk
     uint16_t vector_chunks = 8;      // chunks per VectorRead when vector/mixed
     double vector_fraction = 0.4;    // mixed: fraction of sessions that are vector
-    double file_fraction = 1.0;      // fraction of each file to read
-    uint64_t max_bytes = 0;          // 0 = use file_fraction only (unless max_bytes_auto)
-    bool max_bytes_auto = false;     // compute max_bytes once at start from rate / workers
+    uint64_t max_bytes = 0;          // 0 = uncapped by bytes (unless max_bytes_auto)
+    bool max_bytes_auto = false;     // compute max_bytes once at start from rate / max_inflight
     uint64_t seed = 1;
     bool dry_run = false;
 
@@ -65,18 +64,17 @@ const char* PatternTypeName(PatternType t);
 // Rate / session sizing policy (compile-time; not CLI-tunable).
 //
 // --max-bytes auto  (ComputeAutoMaxBytes):
-//   charge ≈ (target_rate / workers) × kAutoMaxAmortizeSec
+//   charge ≈ (target_rate / max_inflight) × kAutoMaxAmortizeSec
 //   floor  = kAutoMaxFloorChunks × chunk_size
 //   ceil   = min(target_rate × kRateHeadroomSec, kAutoMaxHardCapBytes)
 //
 // Pre-Stat token charge  (EstimateSessionCharge):
-//   max_bytes if set; else kEstimateChargePartialChunks × chunk when
-//   0 < file_fraction < 1; else kEstimateChargeFullChunks × chunk.
+//   max_bytes if set; else kEstimateChargeFullChunks × chunk.
 //   Vector sessions charge at least one VectorRead op.
 //
 // Token-bucket burst  (ComputeBucketBurst):
-//   max(workers × charge, target_rate × kRateHeadroomSec, charge)
-//   Intentional: admits a full worker pipeline immediately, so achieved
+//   max(max_inflight × charge, target_rate × kRateHeadroomSec, charge)
+//   Intentional: admits a full max_inflight pipeline immediately, so achieved
 //   rate can briefly overshoot --rate at start or after stalls.
 //
 // End-of-run drain wait  (RunEngine):
@@ -86,7 +84,6 @@ const char* PatternTypeName(PatternType t);
 inline constexpr double kAutoMaxAmortizeSec = 8.0;
 inline constexpr uint32_t kAutoMaxFloorChunks = 4;
 inline constexpr uint64_t kAutoMaxHardCapBytes = 32ull * 1000 * 1000;  // 32 MB (SI)
-inline constexpr uint32_t kEstimateChargePartialChunks = 4;
 inline constexpr uint32_t kEstimateChargeFullChunks = 16;
 // Seconds of target_rate used as (a) auto max_bytes aggregate cap and
 // (b) minimum token-bucket headroom beyond one pipeline of charges.
@@ -104,7 +101,7 @@ uint64_t EstimateSessionCharge(const RunConfig& cfg, bool use_vector);
 // Token-bucket burst capacity from the rate policy above.
 uint64_t ComputeBucketBurst(const RunConfig& cfg);
 
-// If max_bytes_auto and rate > 0, fill max_bytes from rate/workers.
+// If max_bytes_auto and rate > 0, fill max_bytes from rate/max_inflight.
 // Uncapped (target_rate_bps == 0) requires explicit max_bytes > 0 — throws
 // if max_bytes_auto or max_bytes == 0.
 void ResolveRunConfig(RunConfig& cfg);

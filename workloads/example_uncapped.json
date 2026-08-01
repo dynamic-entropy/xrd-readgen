@@ -12,13 +12,12 @@
       "endpoint": "root://localhost:10945/",
       "filelist": "../filelists/local.txt",
       "target_rate": "uncapped",
-      "workers": 16,
       "pattern": {
         "type": "sequential",
         "read_size": "1MiB",
-        "file_fraction": 1.0,
         "max_bytes": "32MiB"
-      }
+      },
+      "max_inflight": 16
     }
   ],
   "client_tuning": {

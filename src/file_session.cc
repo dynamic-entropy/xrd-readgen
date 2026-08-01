@@ -355,9 +355,6 @@ class FileSession : public std::enable_shared_from_this<FileSession> {
         uint64_t start = opts_.offset;
         uint64_t budget = file_size_;
 
-        if (opts_.file_fraction > 0.0 && opts_.file_fraction < 1.0) {
-            budget = static_cast<uint64_t>(static_cast<double>(file_size_) * opts_.file_fraction);
-        }
         if (opts_.max_bytes > 0) budget = std::min(budget, opts_.max_bytes);
 
         if (opts_.random_offset && file_size_ > 0) {

@@ -19,7 +19,6 @@ struct PatternSpec {
     PatternType type = PatternType::Sequential;
     std::string read_size_input = "1MiB";
     uint32_t chunk_size = 1 << 20;
-    double file_fraction = 1.0;
     double vector_fraction = 0.4;
     uint16_t vector_chunks = 8;
     std::string max_bytes_input = "auto";
@@ -35,7 +34,7 @@ struct TargetSpec {
     std::vector<std::string> files;
     std::string target_rate_input;    // empty = uncapped
     uint64_t target_rate_bps = 0;
-    uint32_t workers = 16;
+    uint32_t max_inflight = 16;
     PatternSpec pattern;
 };
 

@@ -63,7 +63,7 @@ TEST(MetricsRegistry, SessionOkAndFail) {
     EXPECT_EQ(s.sessions_fail, 1u);
     EXPECT_EQ(s.read_ops_total, 2u);
     EXPECT_EQ(s.peak_inflight, 5u);
-    EXPECT_EQ(s.workers_configured, 8u);
+    EXPECT_EQ(s.max_inflight, 8u);
     EXPECT_EQ(s.errors_by_class.at("connection"), 1u);
     EXPECT_EQ(s.open_seconds.count, 1u);
     EXPECT_GE(s.cpu_seconds_total, 0.0);

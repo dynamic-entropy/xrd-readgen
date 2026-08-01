@@ -89,7 +89,7 @@ struct MetricsSnapshot {
 
     uint64_t inflight_reads = 0;
     uint64_t peak_inflight = 0;
-    uint32_t workers_configured = 0;
+    uint32_t max_inflight = 0;
 
     double cpu_seconds_total = 0.0;
     uint64_t process_resident_memory_bytes = 0;
@@ -119,7 +119,7 @@ ProcessSample SampleProcess();
 class MetricsRegistry {
 public:
     void SetLabels(std::string run_id, std::string job_id, std::string target, std::string endpoint);
-    void SetConfigGauges(uint64_t target_rate_bps, uint32_t workers);
+    void SetConfigGauges(uint64_t target_rate_bps, uint32_t max_inflight);
 
     // Optional CMS site map for clean hostname→site attribution. Not owned.
     void SetSiteMap(const SiteMap* map);
@@ -162,7 +162,7 @@ private:
     std::atomic<uint64_t> sessions_fail_{0};
     std::atomic<uint64_t> read_ops_total_{0};
     std::atomic<uint64_t> target_rate_bytes_{0};
-    std::atomic<uint32_t> workers_configured_{0};
+    std::atomic<uint32_t> max_inflight_{0};
     std::atomic<uint64_t> inflight_reads_{0};
     std::atomic<uint64_t> peak_inflight_{0};
 

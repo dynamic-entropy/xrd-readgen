@@ -13,7 +13,6 @@ WorkItem Scheduler::Next() {
 
     item.session.url = JoinUrl(cfg_.endpoint, path);
     item.session.chunk_size = cfg_.chunk_size;
-    item.session.file_fraction = cfg_.file_fraction;
     item.session.max_bytes = cfg_.max_bytes;
     item.session.offset = 0;
     item.session.random_offset = false;

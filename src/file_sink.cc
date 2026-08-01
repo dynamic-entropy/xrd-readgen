@@ -50,7 +50,7 @@ json SnapshotToJsonl(const MetricsSnapshot& s) {
     j["readgen_soft_faults_total"] = s.soft_faults_by_kind;
     j["readgen_inflight_reads"] = s.inflight_reads;
     j["readgen_peak_inflight"] = s.peak_inflight;
-    j["readgen_workers_configured"] = s.workers_configured;
+    j["readgen_max_inflight"] = s.max_inflight;
     j["readgen_cpu_seconds_total"] = s.cpu_seconds_total;
     j["process_resident_memory_bytes"] = s.process_resident_memory_bytes;
     if (!s.by_data_server.empty()) {
@@ -148,7 +148,7 @@ void FileSink::WriteResult(const MetricsSnapshot& snap, double cpu_seconds_at_st
     j["sessions_fail"] = snap.sessions_fail;
     j["ops"] = snap.read_ops_total;
     j["peak_inflight"] = snap.peak_inflight;
-    j["workers"] = snap.workers_configured;
+    j["max_inflight"] = snap.max_inflight;
     j["errors"] = snap.errors_by_class;
     j["soft_faults"] = snap.soft_faults_by_kind;
     j["latency"] = {{"open_seconds", LatencyPercentiles(snap.open_seconds)},
