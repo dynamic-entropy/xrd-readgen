@@ -196,6 +196,12 @@ fi
 echo "==> installing to ${PREFIX}"
 install -d "${PREFIX}/bin" "${PREFIX}/share"
 install -m 0755 "${src}/bin/xrd-readgen" "${PREFIX}/bin/xrd-readgen"
+if [[ -f "${src}/bin/multi_run.py" ]]; then
+  install -m 0755 "${src}/bin/multi_run.py" "${PREFIX}/bin/multi_run.py"
+fi
+if [[ -f "${src}/bin/capacity_sweep.py" ]]; then
+  install -m 0755 "${src}/bin/capacity_sweep.py" "${PREFIX}/bin/capacity_sweep.py"
+fi
 rm -rf "${PREFIX}/share/xrd-readgen"
 cp -a "${src}/share/xrd-readgen" "${PREFIX}/share/"
 
@@ -223,6 +229,12 @@ seed_file "${share}/filelists/remote_single.txt" "${CONFIG_DIR}/filelists/remote
 
 echo "==> done"
 echo "  binary:  ${PREFIX}/bin/xrd-readgen"
+if [[ -x "${PREFIX}/bin/multi_run.py" ]]; then
+  echo "  multi_run.py:       ${PREFIX}/bin/multi_run.py"
+fi
+if [[ -x "${PREFIX}/bin/capacity_sweep.py" ]]; then
+  echo "  capacity_sweep.py:  ${PREFIX}/bin/capacity_sweep.py"
+fi
 echo "  config:  ${CONFIG_DIR}"
 echo "  results: ${RESULTS_DIR}"
 if ! "${PREFIX}/bin/xrd-readgen" version; then

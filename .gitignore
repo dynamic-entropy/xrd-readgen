@@ -5,6 +5,8 @@ docs/
 compile_commands.json
 proxy
 results/
+__pycache__/
+*.py[cod]
 
 # Real AAA / site configs (filenames + hostnames) — keep local only
 **/*.local.json

@@ -96,6 +96,8 @@ cleanup() { "$ENGINE" rm -f "$cid" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 "$ENGINE" cp "${cid}:/out/xrd-readgen" "${STAGE}/bin/xrd-readgen"
 chmod 0755 "${STAGE}/bin/xrd-readgen"
+install -m 0755 "${ROOT}/scripts/multi_run.py" "${STAGE}/bin/multi_run.py"
+install -m 0755 "${ROOT}/scripts/capacity_sweep.py" "${STAGE}/bin/capacity_sweep.py"
 cp -a packaging/share/xrd-readgen "${STAGE}/share/"
 
 echo "==> packing ${TARBALL}"
