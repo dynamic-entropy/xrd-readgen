@@ -425,7 +425,7 @@ int RunEngine(const RunConfig& cfg) {
     }
     if (unmapped_servers > 0) {
         std::printf("unmapped:       %zu data_server(s) bytes=%s ok=%" PRIu64 " fail=%" PRIu64
-                    " (detail: result.json by_data_server / Grafana D2)\n",
+                    " (detail: result.json by_data_server / Grafana D1)\n",
                     unmapped_servers, FormatBytes(unmapped_bytes).c_str(), unmapped_ok,
                     unmapped_fail);
         if (cfg.site_map_path.empty() && !cfg.sitename_query) {
@@ -434,7 +434,7 @@ int RunEngine(const RunConfig& cfg) {
             std::printf("hint:          some servers omit sitename; optional --site-map for overrides\n");
         }
     } else if (final_snap.by_cms_site.empty() && !final_snap.by_data_server.empty()) {
-        std::printf("data_servers:   %zu (no cms_site map hits; detail in result.json / D2)\n",
+        std::printf("data_servers:   %zu (no cms_site map hits; detail in result.json / D1)\n",
                     final_snap.by_data_server.size());
     }
 

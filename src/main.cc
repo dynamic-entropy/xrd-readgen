@@ -10,6 +10,7 @@
 #include "readgen/log.hh"
 #include "readgen/probe_command.hh"
 #include "readgen/read_command.hh"
+#include "readgen/report_command.hh"
 #include "readgen/run_command.hh"
 #include "readgen/run_config.hh"
 #include "readgen/units.hh"
@@ -20,11 +21,6 @@
 #include <vector>
 
 namespace {
-
-int NotImplemented(const char* cmd, const char* note) {
-    std::fprintf(stderr, "%s: not implemented yet (%s)\n", cmd, note);
-    return 2;
-}
 
 readgen::PatternType ParsePattern(const std::string& s) {
     if (s == "sequential") return readgen::PatternType::Sequential;
@@ -162,7 +158,18 @@ int main(int argc, char** argv) {
     probe_cmd->add_flag("--skip-auth-check", probe_opts.skip_auth_check,
                        "Skip x509 proxy preflight (local GSI-less rehearsal)");
 
-    auto* report_cmd = app.add_subcommand("report", "Summarize a run from its result files");
+    readgen::ReportOptions report_opts;
+    auto* report_cmd = app.add_subcommand(
+        "report", "Summarize FileSink result.json (single run or multi_run fleet)");
+    report_cmd->add_option("path", report_opts.path,
+                           "Run directory, result.json, or results root (with --run-id)");
+    report_cmd->add_option("--results-dir", report_opts.results_dir,
+                           "FileSink root (use with --run-id)");
+    report_cmd->add_option("--run-id", report_opts.run_id,
+                           "Run id under results root or i*/{run_id}/");
+    report_cmd->add_flag("--fleet", report_opts.fleet,
+                        "Require multi_run layout: results/i*/{run_id}/result.json");
+    report_cmd->add_flag("--json", report_opts.json, "JSON report on stdout");
     auto* version_cmd = app.add_subcommand("version", "Version info");
 
     CLI11_PARSE(app, argc, argv);
@@ -264,7 +271,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (probe_cmd->parsed()) return readgen::RunProbeCommand(probe_opts);
-    if (report_cmd->parsed()) return NotImplemented("report", "coming later");
+    if (report_cmd->parsed()) return readgen::RunReportCommand(report_opts);
     if (version_cmd->parsed()) {
         std::printf("xrd-readgen %s (%s, XrdCl %s)\n", READGEN_VERSION, readgen::BuildArch(),
                     XrdVERSION);

@@ -53,6 +53,7 @@ set(READGEN_SOURCES
   src/workload_spec.cc
   src/auth_check.cc
   src/probe_command.cc
+  src/report_command.cc
   src/workload_run_command.cc
   src/xrdcl_env.cc
   src/site_map.cc
@@ -107,6 +108,7 @@ if(READGEN_ENABLE_TESTS)
     tests/test_workload_run_command.cc
     tests/test_site_map.cc
     tests/test_sitename_resolver.cc
+    tests/test_report_command.cc
     tests/stub_run_command.cc
     src/units.cc
     src/log.cc
@@ -120,6 +122,7 @@ if(READGEN_ENABLE_TESTS)
     src/workload_spec.cc
     src/auth_check.cc
     src/probe_command.cc
+    src/report_command.cc
     src/workload_run_command.cc
     src/xrdcl_env.cc
     src/inflight.cc
