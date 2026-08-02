@@ -20,10 +20,11 @@ Open→…→Close work items — **not** TCP connections.
 Achieved-vs-target panel plots **achieved only** (target series filtered out).
 Configure `max_inflight` / `read_size` / `max_bytes` and read the achieved gauge /
 run summary — see `workloads/example_uncapped.json`. Multi-process fleets share a
-**stable** `run_id` (do not encode N/mi in the id): per-instance series are
-**stacked**; **total** is an unstacked overlay line (`sum by (run_id)`) that
-should ride the stack top. On exit the generator pushes idle zero-rate gauges so
-Achieved rate does not stick at the last sample.
+**stable** `run_id` (do not encode N/mi in the id). Achieved-vs-target: per-instance
+series stacked (`stack1`); **Total** is a second `sum()` query drawn as an
+unstacked line (`stacking: Off`, group `total`) so it rides the stack top without
+double-counting. On exit the generator pushes idle zero-rate gauges so Achieved
+rate does not stick at the last sample.
 
 ## Import (xrdmon)
 

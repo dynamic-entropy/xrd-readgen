@@ -7,6 +7,7 @@
 #include <string>
 
 #include "readgen/build_info.hh"
+#include "readgen/log.hh"
 #include "readgen/probe_command.hh"
 #include "readgen/read_command.hh"
 #include "readgen/run_command.hh"
@@ -227,7 +228,7 @@ int main(int argc, char** argv) {
             run_cfg.session_timeout_s = readgen::ParseDurationString(session_timeout_str);
             run_cfg.write_results = !no_results;
         } catch (const std::exception& e) {
-            std::fprintf(stderr, "error: %s\n", e.what());
+            READGEN_LOG_ERR("error: %s", e.what());
             return 2;
         }
         return readgen::RunRunCommand(run_cfg);

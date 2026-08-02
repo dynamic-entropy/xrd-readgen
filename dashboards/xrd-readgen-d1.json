@@ -40,7 +40,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Achieved vs target (bits/s; Prom gauges are bytes/s \u00d7 8). Per-instance series are stacked (fleet composition); total is an unstacked overlay line (should ride the stack top). Target is dashed/unstacked when > 0. Y soft-min 0.",
+      "description": "Achieved vs target (bits/s; Prom gauges are bytes/s \u00d7 8). Query A: per-instance stacked areas (stack group stack1). Query C: fleet sum as an unstacked line (stacking Off / group total) so it rides the stack top without double-counting. Target (B) is dashed when > 0.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -56,7 +56,7 @@
             "showPoints": "never",
             "spanNulls": false,
             "stacking": {
-              "group": "A",
+              "group": "stack1",
               "mode": "normal"
             }
           },
@@ -65,16 +65,54 @@
         "overrides": [
           {
             "matcher": {
-              "id": "byName",
-              "options": "target"
+              "id": "byFrameRefID",
+              "options": "C"
             },
             "properties": [
               {
                 "id": "custom.stacking",
                 "value": {
-                  "group": "A",
+                  "group": "total",
                   "mode": "none"
                 }
+              },
+              {
+                "id": "custom.drawStyle",
+                "value": "line"
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 2
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "custom.stacking",
+                "value": {
+                  "group": "target",
+                  "mode": "none"
+                }
+              },
+              {
+                "id": "custom.drawStyle",
+                "value": "line"
               },
               {
                 "id": "custom.fillOpacity",
@@ -105,20 +143,24 @@
           },
           {
             "matcher": {
-              "id": "byRegexp",
-              "options": "^total "
+              "id": "byName",
+              "options": "Total"
             },
             "properties": [
               {
                 "id": "custom.stacking",
                 "value": {
-                  "group": "A",
+                  "group": "total",
                   "mode": "none"
                 }
               },
               {
+                "id": "custom.drawStyle",
+                "value": "line"
+              },
+              {
                 "id": "custom.lineWidth",
-                "value": 3
+                "value": 2
               },
               {
                 "id": "custom.fillOpacity",
@@ -164,7 +206,7 @@
             "uid": "${datasource}"
           },
           "expr": "(sum by (run_id, target, instance) (readgen_achieved_rate_bytes{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"})) * 8",
-          "legendFormat": "{{run_id}} {{instance}}",
+          "legendFormat": "{{instance}}",
           "refId": "A"
         },
         {
@@ -181,8 +223,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "(sum by (run_id) (readgen_achieved_rate_bytes{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"})) * 8",
-          "legendFormat": "total {{run_id}}",
+          "expr": "(sum(readgen_achieved_rate_bytes{job=~\"$job\", instance=~\"$instance\", run_id=~\"$run_id\"})) * 8",
+          "legendFormat": "Total",
           "refId": "C"
         }
       ],

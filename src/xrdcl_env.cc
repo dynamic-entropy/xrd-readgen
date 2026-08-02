@@ -1,10 +1,9 @@
 #include "readgen/xrdcl_env.hh"
 
+#include "readgen/log.hh"
 #include "readgen/units.hh"
 
 #include <XrdCl/XrdClDefaultEnv.hh>
-
-#include <cstdio>
 
 namespace readgen {
 
@@ -16,11 +15,11 @@ void ApplyXrdClTimeouts(int connection_window_s, int connection_retry, int reque
     if (connection_retry >= 0) env->PutInt("ConnectionRetry", connection_retry);
     if (request_timeout_s > 0) env->PutInt("RequestTimeout", request_timeout_s);
     if (!log) return;
-    std::fprintf(stderr,
-                 "xrdcl timeouts: ConnectionWindow=%ds ConnectionRetry=%d RequestTimeout=%ds "
-                 "session_timeout=%s\n",
-                 connection_window_s, connection_retry, request_timeout_s,
-                 session_timeout_s > 0 ? FormatDuration(session_timeout_s).c_str() : "off");
+    READGEN_LOG_ERR(
+        "xrdcl timeouts: ConnectionWindow=%ds ConnectionRetry=%d RequestTimeout=%ds "
+        "session_timeout=%s",
+        connection_window_s, connection_retry, request_timeout_s,
+        session_timeout_s > 0 ? FormatDuration(session_timeout_s).c_str() : "off");
 }
 
 }  // namespace readgen

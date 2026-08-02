@@ -5,6 +5,7 @@
 #include "readgen/file_session.hh"
 #include "readgen/file_sink.hh"
 #include "readgen/inflight.hh"
+#include "readgen/log.hh"
 #include "readgen/metrics.hh"
 #include "readgen/pushgateway_sink.hh"
 #include "readgen/scheduler.hh"
@@ -105,18 +106,18 @@ int RunEngine(const RunConfig& cfg) {
         try {
             site_map = SiteMap::LoadFile(cfg.site_map_path);
             site_map_ptr = &site_map;
-            std::fprintf(stderr, "site_map: loaded %zu entries from %s\n", site_map.size(),
+            READGEN_LOG_ERR("site_map: loaded %zu entries from %s", site_map.size(),
                          cfg.site_map_path.c_str());
         } catch (const std::exception& e) {
-            std::fprintf(stderr, "error: %s\n", e.what());
+            READGEN_LOG_ERR("error: %s", e.what());
             return 2;
         }
     }
 
     SitenameResolver sitename_resolver;
     if (cfg.sitename_query) {
-        std::fprintf(stderr,
-                     "sitename_query: on (background thread; independent of I/O and scheduling)\n");
+        READGEN_LOG_ERR(
+            "sitename_query: on (background thread; independent of I/O and scheduling)");
     }
 
     // Burst covers a full max_inflight pipeline so the rate limiter can admit a full
@@ -166,20 +167,20 @@ int RunEngine(const RunConfig& cfg) {
         try {
             sink->Start();
         } catch (const std::exception& e) {
-            std::fprintf(stderr, "error: %s\n", e.what());
+            READGEN_LOG_ERR("error: %s", e.what());
             return 2;
         }
-        std::fprintf(stderr, "results: %s\n", sink->run_dir().c_str());
+        READGEN_LOG_ERR("results: %s", sink->run_dir().c_str());
     }
     if (!cfg.pushgateway_url.empty()) {
         curl_global_init(CURL_GLOBAL_DEFAULT);
         try {
             push = std::make_unique<PushgatewaySink>(cfg.pushgateway_url, cfg.pushgateway_job);
         } catch (const std::exception& e) {
-            std::fprintf(stderr, "error: %s\n", e.what());
+            READGEN_LOG_ERR("error: %s", e.what());
             return 2;
         }
-        std::fprintf(stderr, "pushgateway: %s (job=%s instance=%s)\n", cfg.pushgateway_url.c_str(),
+        READGEN_LOG_ERR("pushgateway: %s (job=%s instance=%s)", cfg.pushgateway_url.c_str(),
                      cfg.pushgateway_job.c_str(), job_id.c_str());
     }
     if (sink || push) {
@@ -194,12 +195,11 @@ int RunEngine(const RunConfig& cfg) {
     const auto deadline = t0 + std::chrono::duration_cast<Clock::duration>(
                                    std::chrono::duration<double>(cfg.duration_s));
 
-    std::fprintf(stderr,
-                 "run %s: duration=%s rate=%s max_inflight=%" PRIu32
-                 " pattern=%s files=%zu burst=%s\n",
-                 cfg.run_id.c_str(), FormatDuration(cfg.duration_s).c_str(),
-                 DescribeTargetRate(cfg).c_str(), cfg.max_inflight, PatternTypeName(cfg.pattern),
-                 cfg.files.size(), FormatBytes(burst).c_str());
+    READGEN_LOG_ERR("run %s: duration=%s rate=%s max_inflight=%" PRIu32
+                    " pattern=%s files=%zu burst=%s",
+                    cfg.run_id.c_str(), FormatDuration(cfg.duration_s).c_str(),
+                    DescribeTargetRate(cfg).c_str(), cfg.max_inflight, PatternTypeName(cfg.pattern),
+                    cfg.files.size(), FormatBytes(burst).c_str());
 
     auto take_snapshot = [&] {
         const auto now = Clock::now();
@@ -210,7 +210,7 @@ int RunEngine(const RunConfig& cfg) {
         if (sink) sink->WriteSnapshot(snap);
         if (push) {
             if (!push->Push(snap)) {
-                std::fprintf(stderr, "warning: pushgateway push failed\n");
+                READGEN_LOG_ERR("warning: pushgateway push failed");
             }
         }
     };
@@ -292,11 +292,11 @@ int RunEngine(const RunConfig& cfg) {
                         file = slash == std::string::npos ? result.url : result.url.substr(slash + 1);
                         if (file.empty()) file = "(unknown)";
                     }
-                    std::fprintf(stderr,
-                                 "session error: %s data_server=%s file=%s "
-                                 "bytes_read=%" PRIu64 " ops=%" PRIu64 " open_ms=%.0f total_s=%.1f\n",
-                                 result.error.c_str(), ds, file.c_str(), result.bytes_read,
-                                 result.ops, result.open_ms, result.total_s);
+                    READGEN_LOG_ERR(
+                        "session error: %s data_server=%s file=%s "
+                        "bytes_read=%" PRIu64 " ops=%" PRIu64 " open_ms=%.0f total_s=%.1f",
+                        result.error.c_str(), ds, file.c_str(), result.bytes_read, result.ops,
+                        result.open_ms, result.total_s);
                 }
             }
 
@@ -325,7 +325,7 @@ int RunEngine(const RunConfig& cfg) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     if (live.load(std::memory_order_relaxed) > 0) {
-        std::fprintf(stderr, "warning: drain timed out with %" PRIu64 " session(s) still live\n",
+        READGEN_LOG_ERR("warning: drain timed out with %" PRIu64 " session(s) still live",
                      live.load(std::memory_order_relaxed));
     }
 
@@ -346,12 +346,12 @@ int RunEngine(const RunConfig& cfg) {
             sink->WriteSnapshot(final_snap);
             sink->WriteResult(final_snap, cpu_at_start);
         } catch (const std::exception& e) {
-            std::fprintf(stderr, "warning: results write failed: %s\n", e.what());
+            READGEN_LOG_ERR("warning: results write failed: %s", e.what());
         }
     }
     if (push) {
         if (!push->Push(final_snap)) {
-            std::fprintf(stderr, "warning: final pushgateway push failed\n");
+            READGEN_LOG_ERR("warning: final pushgateway push failed");
         }
         // Overwrite rate gauges with 0 so Grafana/Prometheus do not hold the last
         // achieved rate after the process exits (lastNotNull / scrape lag).
@@ -361,12 +361,12 @@ int RunEngine(const RunConfig& cfg) {
         idle.by_data_server.clear();
         idle.by_cms_site.clear();
         if (!push->Push(idle)) {
-            std::fprintf(stderr, "warning: idle (zero-rate) pushgateway push failed\n");
+            READGEN_LOG_ERR("warning: idle (zero-rate) pushgateway push failed");
         }
         if (!cfg.pushgateway_keep) {
             push->Finish(job_id);
         } else {
-            std::fprintf(stderr, "pushgateway: keeping idle group job=%s instance=%s\n",
+            READGEN_LOG_ERR("pushgateway: keeping idle group job=%s instance=%s",
                          cfg.pushgateway_job.c_str(), job_id.c_str());
         }
     }
@@ -452,15 +452,15 @@ int RunRunCommand(const RunConfig& cfg_in) {
     try {
         ResolveRunConfig(cfg);
     } catch (const std::exception& e) {
-        std::fprintf(stderr, "error: %s\n", e.what());
+        READGEN_LOG_ERR("error: %s", e.what());
         return 2;
     }
     if (cfg.endpoint.empty()) {
-        std::fprintf(stderr, "error: --endpoint is required\n");
+        READGEN_LOG_ERR("error: --endpoint is required");
         return 2;
     }
     if (cfg.files.empty()) {
-        std::fprintf(stderr, "error: filelist is empty\n");
+        READGEN_LOG_ERR("error: filelist is empty");
         return 2;
     }
     if (cfg.dry_run) {
@@ -468,9 +468,9 @@ int RunRunCommand(const RunConfig& cfg_in) {
         return 0;
     }
     if (cfg.max_bytes_auto) {
-        std::fprintf(stderr, "max_bytes auto → %s (rate/max_inflight × %.0fs, capped at %s)\n",
-                     FormatBytes(cfg.max_bytes).c_str(), kAutoMaxAmortizeSec,
-                     FormatBytes(kAutoMaxHardCapBytes).c_str());
+        READGEN_LOG_ERR("max_bytes auto → %s (rate/max_inflight × %.0fs, capped at %s)",
+                        FormatBytes(cfg.max_bytes).c_str(), kAutoMaxAmortizeSec,
+                        FormatBytes(kAutoMaxHardCapBytes).c_str());
     }
     return RunEngine(cfg);
 }

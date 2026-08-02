@@ -30,6 +30,7 @@ FetchContent_MakeAvailable(json)
 
 set(READGEN_SOURCES
   src/file_session.cc
+  src/log.cc
   src/read_command.cc
   src/run_command.cc
   src/run_config.cc

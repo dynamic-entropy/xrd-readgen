@@ -8,6 +8,8 @@ Fleet labelling (Grafana):
   Each child has a unique --job-id (Pushgateway instance): {hostname}-i{i}
   FileSink dirs are per-instance so result.json does not collide:
     {results_dir}/i{i}/{run_id}/
+  Per-process logs ({results_dir}/{run_id}-i{i}.log) are append-only across
+  fleets; each child line is prefixed with a UTC timestamp.
   With Pushgateway, children keep idle (zero-rate) gauges on exit so achieved
   rate drops to 0 instead of sticking at the last sample.
 """
@@ -22,14 +24,52 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, IO, List, Optional
 
 
 ERROR_LINE_RE = re.compile(
     r"Auth failed|timeout|FATAL|error:|No servers|\[Error", re.IGNORECASE
 )
+
+
+def _utc_stamp() -> str:
+    """UTC timestamp with milliseconds, e.g. 2026-08-02T10:15:30.123Z."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
+def _open_append_log(path: Path, *, banner: str) -> IO[str]:
+    """Append-only run log; write a separator so successive fleets stay separable."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    f = open(path, "a", encoding="utf-8", buffering=1)  # noqa: SIM115
+    f.write(f"\n===== {_utc_stamp()} {banner} =====\n")
+    f.flush()
+    return f
+
+
+_ALREADY_STAMPED_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T")
+
+
+def _tee_timestamped(stream: IO[str], log_f: IO[str]) -> None:
+    """Copy child stdout/stderr lines into log_f, each prefixed with a UTC stamp.
+
+    Lines that already start with an ISO-8601 stamp (from the binary) are kept as-is.
+    """
+    try:
+        for line in stream:
+            body = line if line.endswith("\n") else line + "\n"
+            if _ALREADY_STAMPED_RE.match(body):
+                log_f.write(body)
+            else:
+                log_f.write(f"{_utc_stamp()} {body}")
+    finally:
+        try:
+            stream.close()
+        except OSError:
+            pass
 
 
 def _die(msg: str, code: int = 2) -> None:
@@ -276,13 +316,27 @@ def run_fleet(
             )
             if print_summary:
                 print(f"    start i={i} run_id={fleet_run_id} job_id={job_id} log={log_path}")
-            log_f = open(log_path, "w")  # noqa: SIM115 — kept open for child lifetime
+            banner = (
+                f"multi_run start run_id={fleet_run_id} job_id={job_id} "
+                f"n={n} max_inflight={max_inflight} duration={duration}"
+            )
+            log_f = _open_append_log(log_path, banner=banner)
             proc = subprocess.Popen(
                 argv,
-                stdout=log_f,
+                stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
                 start_new_session=True,
             )
+            assert proc.stdout is not None
+            tee = threading.Thread(
+                target=_tee_timestamped,
+                args=(proc.stdout, log_f),
+                name=f"log-tee-i{i}",
+                daemon=True,
+            )
+            tee.start()
             procs.append(proc)
             meta.append(
                 {
@@ -291,12 +345,15 @@ def run_fleet(
                     "log_path": str(log_path),
                     "result_dir": str(inst_results / fleet_run_id),
                     "log_f": log_f,
+                    "tee": tee,
                     "argv": argv,
                 }
             )
 
         for proc, m in zip(procs, meta):
             m["exit"] = proc.wait()
+            tee = m.pop("tee")
+            tee.join(timeout=30)
             m["log_f"].close()
             del m["log_f"]
     finally:
