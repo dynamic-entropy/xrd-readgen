@@ -56,7 +56,7 @@ fi
 
 VERSION="${VERSION:-}"
 if [[ -z "$VERSION" ]]; then
-  VERSION="$(sed -n 's/^[[:space:]]*VERSION[[:space:]]*\([0-9.]*\).*/\1/p' CMakeLists.txt | head -1)"
+  VERSION="$(sed -n 's/^[[:space:]]*set(READGEN_VERSION[[:space:]]*"\([0-9.]*\)").*/\1/p' CMakeLists.txt | head -1)"
 fi
 if [[ -z "$VERSION" ]]; then
   echo "error: could not determine VERSION from CMakeLists.txt" >&2
@@ -78,6 +78,7 @@ fi
 echo "==> building image ${IMAGE_TAG} with ${ENGINE} (platform linux/amd64)"
 if ! "$ENGINE" build \
   --platform=linux/amd64 \
+  --build-arg "VERSION=${VERSION}" \
   -t "$IMAGE_TAG" \
   -f Containerfile \
   .; then
@@ -96,6 +97,8 @@ cleanup() { "$ENGINE" rm -f "$cid" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 "$ENGINE" cp "${cid}:/out/xrd-readgen" "${STAGE}/bin/xrd-readgen"
 chmod 0755 "${STAGE}/bin/xrd-readgen"
+# Version match is checked inside the Containerfile build (linux/amd64); do not
+# re-exec the staged binary here — hosts may be a different arch (e.g. aarch64).
 install -m 0755 "${ROOT}/scripts/multi_run.py" "${STAGE}/bin/multi_run.py"
 install -m 0755 "${ROOT}/scripts/capacity_sweep.py" "${STAGE}/bin/capacity_sweep.py"
 cp -a packaging/share/xrd-readgen "${STAGE}/share/"

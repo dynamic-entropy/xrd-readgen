@@ -237,8 +237,15 @@ if [[ -x "${PREFIX}/bin/capacity_sweep.py" ]]; then
 fi
 echo "  config:  ${CONFIG_DIR}"
 echo "  results: ${RESULTS_DIR}"
-if ! "${PREFIX}/bin/xrd-readgen" version; then
+if ! reported="$("${PREFIX}/bin/xrd-readgen" version)"; then
   echo "error: installed binary failed to run 'version'" >&2
   echo "  fix: check 'ldd ${PREFIX}/bin/xrd-readgen' for missing libraries" >&2
+  exit 1
+fi
+echo "  ${reported}"
+bin_ver="$(awk '{print $2}' <<<"$reported")"
+if [[ -n "$bin_ver" && "$bin_ver" != "$VERSION" ]]; then
+  echo "error: installed binary reports ${bin_ver} but release asset is ${VERSION}" >&2
+  echo "  fix: rebuild the release with VERSION=${VERSION} passed to cmake" >&2
   exit 1
 fi

@@ -19,12 +19,22 @@ RUN dnf -y install epel-release \
 WORKDIR /src
 COPY . /src
 
-RUN cmake -S . -B /build \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DREADGEN_ENABLE_TESTS=OFF \
+# Set by scripts/build-release.sh from the release tag so READGEN_VERSION
+# matches the tarball / GitHub release (not a stale CMakeLists default).
+ARG VERSION=
+RUN cmake_args="-DCMAKE_BUILD_TYPE=Release -DREADGEN_ENABLE_TESTS=OFF" \
+ && if [ -n "$VERSION" ]; then cmake_args="$cmake_args -DREADGEN_VERSION=$VERSION"; fi \
+ && cmake -S . -B /build $cmake_args \
  && cmake --build /build -j"$(nproc)" --target xrd-readgen \
  && mkdir -p /out \
  && cp /build/xrd-readgen /out/xrd-readgen \
- && /out/xrd-readgen version
+ && /out/xrd-readgen version \
+ && if [ -n "$VERSION" ]; then \
+      reported="$(/out/xrd-readgen version | awk '{print $2}')"; \
+      if [ "$reported" != "$VERSION" ]; then \
+        echo "error: binary version ${reported} != release VERSION ${VERSION}" >&2; \
+        exit 1; \
+      fi; \
+    fi
 
 CMD ["true"]

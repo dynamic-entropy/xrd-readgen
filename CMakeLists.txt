@@ -1,7 +1,13 @@
 cmake_minimum_required(VERSION 3.24)
 
+# Default for local builds; release builds pass -DREADGEN_VERSION=<tag> so the
+# binary matches the GitHub release / tarball name.
+if(NOT DEFINED READGEN_VERSION)
+  set(READGEN_VERSION "0.1.4")
+endif()
+
 project(xrd-readgen
-  VERSION 0.1.1
+  VERSION ${READGEN_VERSION}
   DESCRIPTION "XRootD remote-read traffic generator for CMS / WLCG data challenges"
   LANGUAGES CXX)
 
@@ -103,6 +109,7 @@ if(READGEN_ENABLE_TESTS)
     tests/test_sitename_resolver.cc
     tests/stub_run_command.cc
     src/units.cc
+    src/log.cc
     src/token_bucket.cc
     src/error_classifier.cc
     src/run_config.cc
