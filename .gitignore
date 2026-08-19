@@ -8,6 +8,11 @@ results/
 __pycache__/
 *.py[cod]
 
+# XrdClRecorder campaign dumps (keep fixtures under tests/)
+recordings/
+xrdrecord_*.csv
+0000/
+
 # Real AAA / site configs (filenames + hostnames) — keep local only
 **/*.local.json
 **/*.local.txt

@@ -52,7 +52,7 @@ json SnapshotToJsonl(const MetricsSnapshot& s) {
     j["readgen_peak_inflight"] = s.peak_inflight;
     j["readgen_max_inflight"] = s.max_inflight;
     j["readgen_cpu_seconds_total"] = s.cpu_seconds_total;
-    j["process_resident_memory_bytes"] = s.process_resident_memory_bytes;
+    j["readgen_process_resident_memory_bytes"] = s.process_resident_memory_bytes;
     if (!s.by_data_server.empty()) {
         json by_ds = json::object();
         for (const auto& kv : s.by_data_server) {
@@ -159,7 +159,7 @@ void FileSink::WriteResult(const MetricsSnapshot& snap, double cpu_seconds_at_st
                     {"read_seconds", LatencyPercentiles(snap.read_seconds)},
                     {"redirects_per_open", LatencyPercentiles(snap.redirects_per_open)}};
     j["readgen_cpu_seconds_total"] = snap.cpu_seconds_total;
-    j["process_resident_memory_bytes"] = snap.process_resident_memory_bytes;
+    j["readgen_process_resident_memory_bytes"] = snap.process_resident_memory_bytes;
     j["readgen_bytes_per_cpu_second"] = bytes_per_cpu;
     j["run_info"] = {{"version", meta_.version},
                      {"arch", meta_.arch},

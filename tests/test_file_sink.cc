@@ -59,6 +59,7 @@ TEST_F(FileSinkTest, WritesJsonlAndResult) {
     auto j = json::parse(line);
     EXPECT_EQ(j["run_id"], "t1");
     EXPECT_EQ(j["readgen_bytes_read_total"], 1024 * 1024);
+    EXPECT_TRUE(j.contains("readgen_process_resident_memory_bytes"));
     ASSERT_TRUE(j["readgen_open_seconds"].contains("counts"));
     ASSERT_TRUE(j["readgen_open_seconds"].contains("bounds"));
     ASSERT_TRUE(j["readgen_open_seconds"].contains("sum"));
@@ -73,6 +74,7 @@ TEST_F(FileSinkTest, WritesJsonlAndResult) {
     EXPECT_EQ(result["bytes_read"], 1024 * 1024);
     EXPECT_TRUE(result["latency"]["open_seconds"].contains("p50"));
     EXPECT_TRUE(result.contains("readgen_bytes_per_cpu_second"));
+    EXPECT_TRUE(result.contains("readgen_process_resident_memory_bytes"));
     EXPECT_EQ(result["run_info"]["seed"], 42);
     ASSERT_TRUE(result.contains("by_data_server"));
     EXPECT_EQ(result["by_data_server"]["localhost:10945"]["bytes_read"], 1024 * 1024);

@@ -3,7 +3,9 @@
 
 #include <gtest/gtest.h>
 
+#include <sstream>
 #include <string>
+#include <vector>
 
 using readgen::EncodePrometheusText;
 using readgen::ErrorClass;
@@ -46,4 +48,34 @@ TEST(PromEncode, ContainsCoreSeriesAndHistogramBuckets) {
     EXPECT_NE(text.find("data_server=\"srv-a:1094\""), std::string::npos);
     EXPECT_NE(text.find("data_server=\"srv-b:1094\""), std::string::npos);
     EXPECT_NE(text.find("readgen_endpoint_sessions_total{"), std::string::npos);
+}
+
+TEST(PromEncode, AllMetricNamesUseReadgenPrefix) {
+    MetricsRegistry reg;
+    reg.SetLabels("run-a", "host1", "default", "root://localhost/");
+    reg.SetConfigGauges(10 * 1024 * 1024, 4);
+    reg.ObserveSessionOk(1024, 2, 0.01, 0.02, 0.5, 1.0, "srv-a:1094", "T2_UK_SGrid");
+    reg.ObserveSessionFail(ErrorClass::Timeout, "srv-a:1094", "T2_UK_SGrid");
+    reg.ObserveSoftFault("connection");
+    reg.SetInflight(1, 2);
+    reg.SampleProc();
+
+    const std::string text = EncodePrometheusText(reg.Snapshot(1.25));
+    std::istringstream in(text);
+    std::string line;
+    std::vector<std::string> names;
+    while (std::getline(in, line)) {
+        constexpr char kHelp[] = "# HELP ";
+        if (line.compare(0, sizeof(kHelp) - 1, kHelp) != 0) continue;
+        const std::string rest = line.substr(sizeof(kHelp) - 1);
+        const auto space = rest.find(' ');
+        ASSERT_NE(space, std::string::npos) << line;
+        names.push_back(rest.substr(0, space));
+    }
+    ASSERT_FALSE(names.empty());
+    for (const auto& name : names) {
+        EXPECT_EQ(name.compare(0, 8, "readgen_"), 0) << name;
+        EXPECT_NE(name.compare(0, 8, "process_"), 0) << name;
+        EXPECT_NE(name.compare(0, 3, "go_"), 0) << name;
+    }
 }

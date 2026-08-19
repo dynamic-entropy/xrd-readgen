@@ -3,7 +3,9 @@
 #include <cinttypes>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <sstream>
+#include <stdexcept>
 
 namespace readgen {
 namespace {
@@ -33,17 +35,32 @@ std::string CommonLabels(const MetricsSnapshot& s) {
     return o.str();
 }
 
+// Prometheus: application metrics use a unique namespace prefix so they cannot
+// collide with process_*/go_* (or other jobs) in Pushgateway.
+constexpr char kMetricPrefix[] = "readgen_";
+
+void RequireReadgenPrefix(const char* name) {
+    if (std::strncmp(name, kMetricPrefix, sizeof(kMetricPrefix) - 1) != 0) {
+        throw std::logic_error(std::string("Prometheus metric name must start with readgen_: ") +
+                               name);
+    }
+}
+
+void AppendHelpType(std::ostringstream& o, const char* name, const char* help, const char* type) {
+    RequireReadgenPrefix(name);
+    o << "# HELP " << name << ' ' << help << '\n';
+    o << "# TYPE " << name << ' ' << type << '\n';
+}
+
 void AppendCounter(std::ostringstream& o, const char* name, const char* help, const std::string& labels,
                    uint64_t value) {
-    o << "# HELP " << name << ' ' << help << '\n';
-    o << "# TYPE " << name << " counter\n";
+    AppendHelpType(o, name, help, "counter");
     o << name << '{' << labels << "} " << value << '\n';
 }
 
 void AppendGauge(std::ostringstream& o, const char* name, const char* help, const std::string& labels,
                  double value) {
-    o << "# HELP " << name << ' ' << help << '\n';
-    o << "# TYPE " << name << " gauge\n";
+    AppendHelpType(o, name, help, "gauge");
     char buf[64];
     std::snprintf(buf, sizeof(buf), "%.9g", value);
     o << name << '{' << labels << "} " << buf << '\n';
@@ -51,15 +68,13 @@ void AppendGauge(std::ostringstream& o, const char* name, const char* help, cons
 
 void AppendGaugeU64(std::ostringstream& o, const char* name, const char* help, const std::string& labels,
                     uint64_t value) {
-    o << "# HELP " << name << ' ' << help << '\n';
-    o << "# TYPE " << name << " gauge\n";
+    AppendHelpType(o, name, help, "gauge");
     o << name << '{' << labels << "} " << value << '\n';
 }
 
 void AppendHistogram(std::ostringstream& o, const char* name, const char* help, const std::string& labels,
                      const HistogramSnapshot& h) {
-    o << "# HELP " << name << ' ' << help << '\n';
-    o << "# TYPE " << name << " histogram\n";
+    AppendHelpType(o, name, help, "histogram");
 
     uint64_t cum = 0;
     const size_t n_finite = h.bounds.size();
@@ -97,8 +112,7 @@ std::string EncodePrometheusText(const MetricsSnapshot& snap) {
     {
         const std::string ok = L + ",result=\"ok\"";
         const std::string fail = L + ",result=\"fail\"";
-        o << "# HELP readgen_sessions_total Completed file sessions\n";
-        o << "# TYPE readgen_sessions_total counter\n";
+        AppendHelpType(o, "readgen_sessions_total", "Completed file sessions", "counter");
         o << "readgen_sessions_total{" << ok << "} " << snap.sessions_ok << '\n';
         o << "readgen_sessions_total{" << fail << "} " << snap.sessions_fail << '\n';
     }
@@ -116,8 +130,8 @@ std::string EncodePrometheusText(const MetricsSnapshot& snap) {
                     snap.redirects_per_open);
 
     if (!snap.errors_by_class.empty()) {
-        o << "# HELP readgen_errors_total Hard session failures by classifier class\n";
-        o << "# TYPE readgen_errors_total counter\n";
+        AppendHelpType(o, "readgen_errors_total", "Hard session failures by classifier class",
+                       "counter");
         for (const auto& e : snap.errors_by_class) {
             o << "readgen_errors_total{" << L << ",class=\"" << EscapeLabel(e.first) << "\"} "
               << e.second << '\n';
@@ -125,8 +139,8 @@ std::string EncodePrometheusText(const MetricsSnapshot& snap) {
     }
 
     if (!snap.soft_faults_by_kind.empty()) {
-        o << "# HELP readgen_soft_faults_total XrdCl Error-level log lines (may not fail a session)\n";
-        o << "# TYPE readgen_soft_faults_total counter\n";
+        AppendHelpType(o, "readgen_soft_faults_total",
+                       "XrdCl Error-level log lines (may not fail a session)", "counter");
         for (const auto& e : snap.soft_faults_by_kind) {
             o << "readgen_soft_faults_total{" << L << ",kind=\"" << EscapeLabel(e.first) << "\"} "
               << e.second << '\n';
@@ -141,19 +155,20 @@ std::string EncodePrometheusText(const MetricsSnapshot& snap) {
                    snap.max_inflight);
     AppendGauge(o, "readgen_cpu_seconds_total", "Process CPU time (utime+stime) in seconds", L,
                 snap.cpu_seconds_total);
-    AppendGaugeU64(o, "process_resident_memory_bytes", "Process RSS in bytes", L,
+    AppendGaugeU64(o, "readgen_process_resident_memory_bytes", "Process RSS in bytes", L,
                    snap.process_resident_memory_bytes);
     AppendGauge(o, "readgen_wall_seconds", "Elapsed wall time of the run so far", L, snap.wall_s);
 
     if (!snap.by_data_server.empty()) {
-        o << "# HELP readgen_endpoint_bytes_total Bytes read attributed to resolved DataServer\n";
-        o << "# TYPE readgen_endpoint_bytes_total counter\n";
-        o << "# HELP readgen_endpoint_achieved_rate_bytes Cumulative bytes/wall for this DataServer "
-             "(same definition as readgen_achieved_rate_bytes)\n";
-        o << "# TYPE readgen_endpoint_achieved_rate_bytes gauge\n";
-        o << "# HELP readgen_endpoint_sessions_total Completed FileSessions attributed to resolved "
-             "DataServer (not TCP connections)\n";
-        o << "# TYPE readgen_endpoint_sessions_total counter\n";
+        AppendHelpType(o, "readgen_endpoint_bytes_total",
+                       "Bytes read attributed to resolved DataServer", "counter");
+        AppendHelpType(o, "readgen_endpoint_achieved_rate_bytes",
+                       "Cumulative bytes/wall for this DataServer "
+                       "(same definition as readgen_achieved_rate_bytes)",
+                       "gauge");
+        AppendHelpType(o, "readgen_endpoint_sessions_total",
+                       "Completed FileSessions attributed to resolved DataServer (not TCP connections)",
+                       "counter");
         bool any_ep_errors = false;
         for (const auto& kv : snap.by_data_server) {
             if (!kv.second.errors_by_class.empty()) {
@@ -162,8 +177,8 @@ std::string EncodePrometheusText(const MetricsSnapshot& snap) {
             }
         }
         if (any_ep_errors) {
-            o << "# HELP readgen_endpoint_errors_total Hard failures by DataServer and class\n";
-            o << "# TYPE readgen_endpoint_errors_total counter\n";
+            AppendHelpType(o, "readgen_endpoint_errors_total",
+                           "Hard failures by DataServer and class", "counter");
         }
         for (const auto& kv : snap.by_data_server) {
             const EndpointStats& ep = kv.second;
@@ -193,12 +208,12 @@ std::string EncodePrometheusText(const MetricsSnapshot& snap) {
     }
 
     if (!snap.by_cms_site.empty()) {
-        o << "# HELP readgen_site_bytes_total Bytes read attributed to CMS site (mapped servers only)\n";
-        o << "# TYPE readgen_site_bytes_total counter\n";
-        o << "# HELP readgen_site_achieved_rate_bytes Cumulative bytes/wall for this CMS site\n";
-        o << "# TYPE readgen_site_achieved_rate_bytes gauge\n";
-        o << "# HELP readgen_site_sessions_total Completed FileSessions attributed to CMS site\n";
-        o << "# TYPE readgen_site_sessions_total counter\n";
+        AppendHelpType(o, "readgen_site_bytes_total",
+                       "Bytes read attributed to CMS site (mapped servers only)", "counter");
+        AppendHelpType(o, "readgen_site_achieved_rate_bytes",
+                       "Cumulative bytes/wall for this CMS site", "gauge");
+        AppendHelpType(o, "readgen_site_sessions_total",
+                       "Completed FileSessions attributed to CMS site", "counter");
         for (const auto& kv : snap.by_cms_site) {
             const SiteStats& site = kv.second;
             const std::string SL =
